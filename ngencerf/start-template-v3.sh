@@ -363,18 +363,21 @@ if [[ "${service_build}" == "true" ]]; then
   CACHE_BUST=$(date +%s) docker compose -f production-pw.yaml up -d --build ngencerf-services
 
   # build locally and start ngencerf-ui
-  docker compose -f production-pw.yaml up -d --build --no-deps ngencerf-ui
+  CACHE_BUST=$(date +%s) docker compose -f production-pw.yaml up -d --build --no-deps ngencerf-ui
 
 else
   # pull ngencerf-server from registry
-  CACHE_BUST=$(date +%s) docker compose -f production-pw.yaml pull ngencerf-services
+  # CACHE_BUST=$(date +%s) docker compose -f production-pw.yaml pull ngencerf-services
 
   # start ngencerf-server
-  CACHE_BUST=$(date +%s) docker compose -f production-pw.yaml up -d --no-build ngencerf-services
+  docker compose -f production-pw.yaml up -d --no-build --no-recreate ngencerf-services
 
   # build locally and start ngencerf-ui
   # TODO: pull from registry
-  docker compose -f production-pw.yaml up -d --build --no-deps ngencerf-ui
+  # docker compose -f production-pw.yaml up -d --build --no-deps ngencerf-ui
+
+  # start ngencerf-ui
+  docker compose -f production-pw.yaml up -d --no-build --no-recreate --no-deps ngencerf-ui
 fi
 
 ngencerf_image="$(docker compose -f production-pw.yaml config | awk '/ngencerf-server/{flag=1} flag && /image:/{print $2; exit}')"
