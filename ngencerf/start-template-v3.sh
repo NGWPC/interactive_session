@@ -327,7 +327,11 @@ chmod a+w ${service_ngencerf_ui_dir}/production-pw.yaml
 #container_name="ngencerf-ui-ngencerf-app-${service_port}"
 #echo "sudo docker stop ${container_name}" >> cancel.sh
 echo "cd ${service_ngencerf_docker_dir}" >> cancel.sh
-echo "docker compose --env-file /ngencerf-app/ngencerf-server/docker.env --env-file /ngencerf-app/ngencerf-server/cerfServer/.env-override -f production-pw.yaml down --remove-orphans" >> cancel.sh
+echo "docker compose \
+  --env-file /ngencerf-app/ngencerf-server/docker.env \
+  --env-file /ngencerf-app/ngencerf-server/cerfServer/.env-override \
+  --file production-pw.yaml \
+  down --remove-orphans" >> cancel.sh
 
 cd ${service_ngencerf_docker_dir}
 
@@ -354,33 +358,32 @@ if [[ "${service_build}" == "true" ]]; then
   CACHE_BUST=$(date +%s) docker compose \
     --env-file /ngencerf-app/ngencerf-server/docker.env \
     --env-file /ngencerf-app/ngencerf-server/cerfServer/.env-override \
-    -f production-pw.yaml up -d --build ngencerf-services
+    --file production-pw.yaml up --detach --build ngencerf-services
 
   # build locally and start ngencerf-ui
   docker compose \
     --env-file /ngencerf-app/ngencerf-server/docker.env \
     --env-file /ngencerf-app/ngencerf-server/cerfServer/.env-override \
-    -f production-pw.yaml up -d --build --no-deps ngencerf-ui
+    --file production-pw.yaml up --detach --build --no-deps ngencerf-ui
 
 else
   # start ngencerf-server
   CACHE_BUST=$(date +%s) docker compose \
     --env-file /ngencerf-app/ngencerf-server/docker.env \
     --env-file /ngencerf-app/ngencerf-server/cerfServer/.env-override \
-    -f production-pw.yaml up -d --no-build ngencerf-services
-
+    --file production-pw.yaml up --detach --no-build --pull never ngencerf-services
 
   # build locally and start ngencerf-ui
   docker compose \
     --env-file /ngencerf-app/ngencerf-server/docker.env \
     --env-file /ngencerf-app/ngencerf-server/cerfServer/.env-override \
-    -f production-pw.yaml up -d --no-build --no-deps ngencerf-ui
+    --file production-pw.yaml up --detach --no-build --pull never --no-deps ngencerf-ui
 fi
 
 ngencerf_image="$(docker compose \
   --env-file /ngencerf-app/ngencerf-server/docker.env \
   --env-file /ngencerf-app/ngencerf-server/cerfServer/.env-override \
-  -f production-pw.yaml \
+  --file production-pw.yaml \
   config | awk '/ngencerf-server/{flag=1} flag && /image:/{print $2; exit}')"
 
 echo "ngencerf_image=${ngencerf_image}"
@@ -402,7 +405,7 @@ fi
 docker compose \
   --env-file /ngencerf-app/ngencerf-server/docker.env \
   --env-file /ngencerf-app/ngencerf-server/cerfServer/.env-override \
-  -f production-pw.yaml \
+  --file production-pw.yaml \
   logs -f
 
 sleep infinity
