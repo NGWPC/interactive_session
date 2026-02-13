@@ -332,7 +332,7 @@ echo "docker compose \
   --project-directory ${service_ngencerf_server_dir} \
   --env-file ${service_ngencerf_server_dir}/docker.env \
   --env-file ${service_ngencerf_server_dir}/cerfServer/.env-override \
-  --file production-pw.yaml \
+  --file ${service_ngencerf_server_dir}/production-pw.yaml \
   down --remove-orphans" >> cancel.sh
 
 # ensure buildx uses the docker driver (not the docker-container helper)
@@ -386,9 +386,8 @@ ngencerf_image="$(docker compose \
   --project-directory ${service_ngencerf_server_dir} \
   --env-file ${service_ngencerf_server_dir}/docker.env \
   --env-file ${service_ngencerf_server_dir}/cerfServer/.env-override \
-  --file production-pw.yaml \
-  config | awk '/ngencerf-server/{flag=1} flag && /image:/{print $2; exit}')"
-
+  --file ${service_ngencerf_server_dir}/production-pw.yaml \
+  config | awk '/ngencerf-services/{flag=1} flag && /image:/{print $2; exit}')"
 echo "ngencerf_image=${ngencerf_image}"
 
 # clean any previous temp container quietly
@@ -407,10 +406,6 @@ fi
 # Tail the logs
 docker compose \
   --project-name ${service_name} \
-  --project-directory ${service_ngencerf_ui_dir} \
-  --env-file ${service_ngencerf_server_dir}/docker.env \
-  --env-file ${service_ngencerf_server_dir}/cerfServer/.env-override \
-  --file production-pw.yaml \
-  logs -f
+  logs --follow
 
 sleep infinity
