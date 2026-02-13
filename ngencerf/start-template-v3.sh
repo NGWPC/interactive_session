@@ -345,6 +345,9 @@ else
   docker buildx create --name localdocker --driver docker --use
 fi
 
+# Silence the expected orphan warning for multi-file projects
+export COMPOSE_IGNORE_ORPHANS=True
+
 if [[ "${service_build}" == "true" ]]; then
   # build locally and start ngencerf-server
   CACHE_BUST=$(date +%s) docker compose \
