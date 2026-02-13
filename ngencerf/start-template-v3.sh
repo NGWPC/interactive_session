@@ -326,21 +326,14 @@ chmod a+w ${service_ngencerf_ui_dir}/production-pw.yaml
 # Run ngencerf-app
 #container_name="ngencerf-ui-ngencerf-app-${service_port}"
 #echo "sudo docker stop ${container_name}" >> cancel.sh
-echo "cd ${service_ngencerf_docker_dir}" >> cancel.sh
+echo "cd ${service_ngencerf_server_dir}" >> cancel.sh
 echo "docker compose \
-  --env-file /ngencerf-app/ngencerf-server/docker.env \
-  --env-file /ngencerf-app/ngencerf-server/cerfServer/.env-override \
-  --file production-pw.yaml \
+  --project-name ${service_name} \
+  --project-directory ${service_ngencerf_server_dir} \
+  --env-file ${service_ngencerf_server_dir}/docker.env \
+  --env-file ${service_ngencerf_server_dir}/cerfServer/.env-override \
+  --file ${service_ngencerf_server_dir}/production-pw.yaml \
   down --remove-orphans" >> cancel.sh
-
-cd ${service_ngencerf_docker_dir}
-
-# This command fails
-#docker compose run --rm --service-ports --entrypoint bash --name ${container_name}\
-#  ngencerf-ui -c "npm run generate && npx --yes serve .output/public/"
-# TODO: How about yeah, just run docker compose up from /ngencerf-app/ngencerf-docker/ folder?
-
-#docker compose run --rm --service-ports --entrypoint bash --name ${container_name} ngencerf-ui
 
 # ensure buildx uses the docker driver (not the docker-container helper)
 # TODO: add this to PW start script
@@ -352,40 +345,52 @@ else
   docker buildx create --name localdocker --driver docker --use
 fi
 
+# Silence the expected orphan warning for multi-file projects
+export COMPOSE_IGNORE_ORPHANS=True
 
 if [[ "${service_build}" == "true" ]]; then
   # build locally and start ngencerf-server
   CACHE_BUST=$(date +%s) docker compose \
-    --env-file /ngencerf-app/ngencerf-server/docker.env \
-    --env-file /ngencerf-app/ngencerf-server/cerfServer/.env-override \
-    --file production-pw.yaml up --detach --build ngencerf-services
+    --project-name ${service_name} \
+    --project-directory ${service_ngencerf_server_dir} \
+    --env-file ${service_ngencerf_server_dir}/docker.env \
+    --env-file ${service_ngencerf_server_dir}/cerfServer/.env-override \
+    --file ${service_ngencerf_server_dir}/production-pw.yaml \
+    up --detach --build ngencerf-services
 
   # build locally and start ngencerf-ui
   docker compose \
-    --env-file /ngencerf-app/ngencerf-server/docker.env \
-    --env-file /ngencerf-app/ngencerf-server/cerfServer/.env-override \
-    --file production-pw.yaml up --detach --build --no-deps ngencerf-ui
+    --project-name ${service_name} \
+    --project-directory ${service_ngencerf_ui_dir} \
+    --file ${service_ngencerf_ui_dir}/production-pw.yaml \
+    up --detach --build --no-deps ngencerf-app
 
 else
   # start ngencerf-server
   CACHE_BUST=$(date +%s) docker compose \
-    --env-file /ngencerf-app/ngencerf-server/docker.env \
-    --env-file /ngencerf-app/ngencerf-server/cerfServer/.env-override \
-    --file production-pw.yaml up --detach --no-build --pull never ngencerf-services
+    --project-name ${service_name} \
+    --project-directory ${service_ngencerf_server_dir} \
+    --env-file ${service_ngencerf_server_dir}/docker.env \
+    --env-file ${service_ngencerf_server_dir}/cerfServer/.env-override \
+    --file ${service_ngencerf_server_dir}/production-pw.yaml \
+    up --detach --no-build --pull never ngencerf-services
 
-  # build locally and start ngencerf-ui
+  # start ngencerf-ui
   docker compose \
-    --env-file /ngencerf-app/ngencerf-server/docker.env \
-    --env-file /ngencerf-app/ngencerf-server/cerfServer/.env-override \
-    --file production-pw.yaml up --detach --no-build --pull never --no-deps ngencerf-ui
+    --project-name ${service_name} \
+    --project-directory ${service_ngencerf_ui_dir} \
+    --file ${service_ngencerf_ui_dir}/production-pw.yaml \
+    up --detach --no-build --pull never --no-deps ngencerf-app
 fi
 
+# get image name for CLI extract
 ngencerf_image="$(docker compose \
-  --env-file /ngencerf-app/ngencerf-server/docker.env \
-  --env-file /ngencerf-app/ngencerf-server/cerfServer/.env-override \
-  --file production-pw.yaml \
-  config | awk '/ngencerf-server/{flag=1} flag && /image:/{print $2; exit}')"
-
+  --project-name ${service_name} \
+  --project-directory ${service_ngencerf_server_dir} \
+  --env-file ${service_ngencerf_server_dir}/docker.env \
+  --env-file ${service_ngencerf_server_dir}/cerfServer/.env-override \
+  --file ${service_ngencerf_server_dir}/production-pw.yaml \
+  config | awk '/ngencerf-services/{flag=1} flag && /image:/{print $2; exit}')"
 echo "ngencerf_image=${ngencerf_image}"
 
 # clean any previous temp container quietly
@@ -403,9 +408,7 @@ fi
 
 # Tail the logs
 docker compose \
-  --env-file /ngencerf-app/ngencerf-server/docker.env \
-  --env-file /ngencerf-app/ngencerf-server/cerfServer/.env-override \
-  --file production-pw.yaml \
-  logs -f
+  --project-name ${service_name} \
+  logs --follow
 
 sleep infinity
