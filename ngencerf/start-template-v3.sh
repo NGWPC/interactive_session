@@ -230,12 +230,12 @@ else
   docker buildx create --name localdocker --driver docker --use
 fi
 
-# export variables needed for compose files
+# export variables needed for ngencerf-ui compose file
 export pw_platform_host="${pw_platform_host}"
 export basepath="${basepath}"
 export ngencerf_port="${ngencerf_port}"
 
-# get ngencerf-server tag to be used within it's compose file
+# get ngencerf-server tag to be used within compose files
 export NGENCERF_SERVER_TAG=$( \
   cd ${service_ngencerf_server_dir} && \
   TAG=$(git describe --tags --exact-match 2>/dev/null); \
@@ -252,7 +252,7 @@ export NGENCERF_SERVER_TAG=$( \
 ) && \
 echo "Using Tag: $NGENCERF_SERVER_TAG"
 
-# get ngencerf-ui tag to be used within it's compose file
+# get ngencerf-ui tag to be used within compose files
 export NGENCERF_UI_TAG=$( \
   cd "${service_ngencerf_ui_dir}" && \
   TAG=$(git describe --tags --exact-match 2>/dev/null); \
