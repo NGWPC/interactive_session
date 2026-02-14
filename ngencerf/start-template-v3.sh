@@ -231,14 +231,16 @@ else
 fi
 
 # get ngencerf-server tag to be used within it's compose file
-cd ${service_ngencerf_server_dir} && \
 export NGENCERF_SERVER_TAG=$( \
+  cd ${service_ngencerf_server_dir} && \
   TAG=$(git describe --tags --exact-match 2>/dev/null); \
   BRANCH=$(git rev-parse --abbrev-ref HEAD); \
   if [ -n "$TAG" ]; then \
     echo "$TAG"; \
   elif [ "$BRANCH" == "development" ]; then \
     echo "latest"; \
+  elif [ "$BRANCH" != "HEAD" ]; then \
+    echo "$BRANCH"; \
   else \
     git rev-parse --short HEAD; \
   fi \
@@ -246,14 +248,16 @@ export NGENCERF_SERVER_TAG=$( \
 echo "Using Tag: $NGENCERF_SERVER_TAG"
 
 # get ngencerf-ui tag to be used within it's compose file
-cd ${service_ngencerf_ui_dir} && \
 export NGENCERF_UI_TAG=$( \
+  cd "${service_ngencerf_ui_dir}" && \
   TAG=$(git describe --tags --exact-match 2>/dev/null); \
   BRANCH=$(git rev-parse --abbrev-ref HEAD); \
   if [ -n "$TAG" ]; then \
     echo "$TAG"; \
   elif [ "$BRANCH" == "development" ]; then \
     echo "latest"; \
+  elif [ "$BRANCH" != "HEAD" ]; then \
+    echo "$BRANCH"; \
   else \
     git rev-parse --short HEAD; \
   fi \
