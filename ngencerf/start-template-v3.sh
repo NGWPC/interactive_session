@@ -230,6 +230,11 @@ else
   docker buildx create --name localdocker --driver docker --use
 fi
 
+# export variables needed for compose files
+export pw_platform_host="${pw_platform_host}"
+export basepath="${basepath}"
+export ngencerf_port="${ngencerf_port}"
+
 # get ngencerf-server tag to be used within it's compose file
 export NGENCERF_SERVER_TAG=$( \
   cd ${service_ngencerf_server_dir} && \
