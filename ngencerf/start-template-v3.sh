@@ -183,92 +183,12 @@ if ! [ -f slurm-wrapper-app-v3.py ]; then
    displayErrorMessage "SLURM wrapper slurm-wrapper-app-v3.py app not found "
 fi
 
-# Make sure permissions are set properly
-#sudo -n chown -R ${USER} ${local_data_dir}
-# sudo -n chmod -R a+rwX ${local_data_dir}
-
-
-# SENT="/var/tmp/chmod_since"
-# sudo test -f "$SENT" || sudo touch -t 197001010000 "$SENT"
-
-# p="$(command -v nproc >/dev/null 2>&1 && nproc || echo 8)"
-# base_dir="${local_data_dir%/}/run-logs"
-# [ -d "$base_dir" ] || exit 0
-
-# # sent markers
-# sent_epoch="$(sudo stat -c %Y "$SENT")"
-# sent_day="$(date -d "@$sent_epoch" +%F)"   # YYYY-MM-DD
-
-# emit_newer_in_dir() {
-#   local d="$1"
-#   find -L "$d" -xdev \
-#     ! -type l \
-#     \( -newer "$SENT" -o -cnewer "$SENT" \) -print0
-# }
-
-# {
-#   # 1) ngen_cal_YYYY-MM-DDThh:mm:ss.xxx directories
-#   find "${base_dir%/}" -maxdepth 1 -type d -name 'ngen_cal_*' -print0 |
-#   while IFS= read -r -d '' d; do
-#     name="$(basename "$d")"                 # ngen_cal_2025-09-02T17:38:54.386
-#     ts="${name#ngen_cal_}"                  # 2025-09-02T17:38:54.386
-#     ts_nomsec="${ts%%.*}"                   # 2025-09-02T17:38:54
-#     dir_day="$(date -d "$ts_nomsec" +%F 2>/dev/null)" || continue
-#     [ "$dir_day" \< "$sent_day" ] && continue
-#     emit_newer_in_dir "$d"
-#   done
-
-#   # 2) YYYY-MM-DD date directories
-#   find "${base_dir%/}" -maxdepth 1 -type d -regextype posix-extended \
-#        -regex '.*/[0-9]{4}-[0-9]{2}-[0-9]{2}$' -print0 |
-#   while IFS= read -r -d '' d; do
-#     dir_day="$(basename "$d")"              # e.g., 2025-09-02
-#     [ "$dir_day" \< "$sent_day" ] && continue
-#     emit_newer_in_dir "$d"
-#   done
-
-#   # 3) mswm/YYYYMMDDThhmmss.log files (nested dir)
-#   mswm_dir="${base_dir%/}/mswm"
-#   if [ -d "$mswm_dir" ]; then
-#     find "${mswm_dir%/}" -maxdepth 1 -type f -regextype posix-extended \
-#          -regex '.*/[0-9]{8}T[0-9]{6}\.log$' -print0 |
-#     while IFS= read -r -d '' f; do
-#       fname="$(basename "$f")"              # 20250923T215414.log
-#       stamp="${fname%.log}"                 # 20250923T215414
-#       iso="${stamp:0:4}-${stamp:4:2}-${stamp:6:2}T${stamp:9:2}:${stamp:11:2}:${stamp:13:2}"
-#       file_epoch="$(date -d "$iso" +%s 2>/dev/null || echo '')"
-#       [ -n "$file_epoch" ] || continue
-#       # same moment or newer than SENT
-#       if [ "$file_epoch" -ge "$sent_epoch" ]; then
-#         printf '%s\0' "$f"
-#       fi
-#     done
-#   fi
-
-#   # 4) run_calib subtree (mtime/ctime day >= sent_day)
-#   find -L "/ngencerf-app/data/ngen-cal-data/ngen-cal-work/run_calib" -xdev \
-#     ! -type l \
-#     \( -newermt "$sent_day 00:00:00" -o -newerct "$sent_day 00:00:00" \) -print0
-
-# } | sudo xargs -0 -r -P"$p" chmod a+rwX && sudo touch "$SENT"
-
-
-#mkdir -p ${local_data_dir}/forecast_forcing_work/esmf_mesh
-#mkdir -p ${local_data_dir}/forecast_forcing_work/raw_input/HRRR
-#mkdir -p ${local_data_dir}/forecast_forcing_work/raw_input/RAP
-#sudo chmod -R a+rwX ${local_data_dir}/forecast_forcing_work/
-#date > ${local_data_dir}/forecast_forcing_work/date.txt
 
 # Install Flask
 sudo -n pip3.8 install Flask
 sudo -n pip3.8 install gunicorn
 
 # Start Flask app using gunicorn
-#gunicorn -w ${service_slurm_app_workers} -b 0.0.0.0:5000 slurm-wrapper-app:app > slurm-wrapper-app-v3.log 2>&1 &
-#sudo env local_data_dir=${local_data_dir} CONTAINER_DATA_DIR=${CONTAINER_DATA_DIR}  ngen_cal_singularity_container_path=${ngen_cal_singularity_container_path} python3.8 slurm-wrapper-app-v3.py > slurm-wrapper-app-v3.log 2>&1 &
-#slurm_wrapper_pid=$!
-#echo "sudo kill ${slurm_wrapper_pid}" >> cancel.sh
-
 export PARTITIONS=$(scontrol show partition | awk -F '=' '/^PartitionName=/ {printf "%s,", $2}' | sed 's/,$//')
 
 # This script is required to run the callback with retries
@@ -281,11 +201,8 @@ chmod +x run_callback.sh
   --capture-output \
   --enable-stdio-inheritance > slurm-wrapper-app-v3.log 2>&1 &
 
-#python3.8 slurm-wrapper-app-v3.py > slurm-wrapper-app-v3.log 2>&1 &
-
 slurm_wrapper_pid=$!
 echo "kill ${slurm_wrapper_pid}" >> cancel.sh
-
 
 # Rerun previous callbacks
 sed -i "s|__LOCAL_DATA_DIR__|${local_data_dir}|g" run_pending_callbacks.sh
@@ -293,39 +210,7 @@ bash run_pending_callbacks.sh >> run_pending_callback.log 2>&1 &
 run_pending_callbacks_pid=$!
 echo "kill ${run_pending_callbacks_pid} #rerun callbacks" >> cancel.sh
 
-###############
-# NGENCERF-UI #
-###############
-# service_ngencerf_ui_dir=/ngencerf-app/ngencerf-ui/compose.yaml
-cat > ${service_ngencerf_ui_dir}/production-pw.yaml <<HERE
-
-name: ngencerf-ui
-
-services:
-  ngencerf-app:
-    build:
-      context: .
-      dockerfile: ./Dockerfile.production-pw
-      args:
-        NGENCERF_BASE_URL: https://${pw_platform_host}${basepath}/api/
-    ports:
-      - "${ngencerf_port}:3000"
-    environment:
-      - NUXT_HOST=0.0.0.0
-      - NUXT_PORT=3000
-      - NUXT_APP_BASE_URL=${basepath}/
-
-HERE
-
-# Grant write permissions to all users
-chmod a+w ${service_ngencerf_ui_dir}/production-pw.yaml
-
-#sed -i "s|^ENV NGENCERF_BASE_URL=.*|ENV NGENCERF_BASE_URL=\"https://${pw_platform_host}${basepath}/api/\"|" ${service_ngencerf_ui_dir}/Dockerfile.production-pw
-
-
 # Run ngencerf-app
-#container_name="ngencerf-ui-ngencerf-app-${service_port}"
-#echo "sudo docker stop ${container_name}" >> cancel.sh
 echo "cd ${service_ngencerf_server_dir}" >> cancel.sh
 echo "docker compose \
   --project-name ${service_name} \
@@ -344,6 +229,36 @@ elif docker buildx ls | grep -q 'localdocker'; then
 else
   docker buildx create --name localdocker --driver docker --use
 fi
+
+# get ngencerf-server tag to be used within it's compose file
+cd ${service_ngencerf_server_dir} && \
+export NGENCERF_SERVER_TAG=$( \
+  TAG=$(git describe --tags --exact-match 2>/dev/null); \
+  BRANCH=$(git rev-parse --abbrev-ref HEAD); \
+  if [ -n "$TAG" ]; then \
+    echo "$TAG"; \
+  elif [ "$BRANCH" == "development" ]; then \
+    echo "latest"; \
+  else \
+    git rev-parse --short HEAD; \
+  fi \
+) && \
+echo "Using Tag: $NGENCERF_SERVER_TAG"
+
+# get ngencerf-ui tag to be used within it's compose file
+cd ${service_ngencerf_ui_dir} && \
+export NGENCERF_UI_TAG=$( \
+  TAG=$(git describe --tags --exact-match 2>/dev/null); \
+  BRANCH=$(git rev-parse --abbrev-ref HEAD); \
+  if [ -n "$TAG" ]; then \
+    echo "$TAG"; \
+  elif [ "$BRANCH" == "development" ]; then \
+    echo "latest"; \
+  else \
+    git rev-parse --short HEAD; \
+  fi \
+) && \
+echo "Using Tag: $NGENCERF_UI_TAG"
 
 # Silence the expected orphan warning for multi-file projects
 export COMPOSE_IGNORE_ORPHANS=True
