@@ -596,7 +596,7 @@ def job_status():
         return log_and_return_error("Job not found", 404)
     except Exception as e:
         return log_and_return_error(str(e), 500)
-        
+
 
 @app.route('/cancel-job', methods=['POST'])
 def cancel_job():

@@ -219,7 +219,7 @@ jobs:
       local_data_dir:
         label: Path to the data directory on the cluster
         type: string
-        default: /ngencerf-app/data/ngen-cal-data/
+        default: /ngencerf-app-lustre/data/ngen-cal-data/
         hidden: true
       pwrl_host:
         type: group
