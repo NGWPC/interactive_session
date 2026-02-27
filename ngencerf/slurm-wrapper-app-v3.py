@@ -108,7 +108,13 @@ def write_slurm_script(run_id, job_type, input_file_local, output_file_local, si
         script.write(f'#SBATCH --job-name={job_type}-{run_id}\n')
         script.write('#SBATCH --nodes=1\n')
         script.write('#SBATCH --no-requeue\n')
-        script.write(f'#SBATCH --ntasks-per-node={nprocs}\n')
+        # using a single task for the full slurm job
+        script.write('#SBATCH --ntasks=1\n')
+        # set cpus-per-task to the nprocs value we get
+        # from the /submit-validation-job call
+        # so that Slurm allocates the right number of cores
+        # for this task
+        script.write(f'#SBATCH --cpus-per-task={nprocs}\n')
         script.write(f'#SBATCH --output={output_file_local}\n')
         script.write('\n')
 
@@ -147,8 +153,19 @@ def write_slurm_script(run_id, job_type, input_file_local, output_file_local, si
         )
 
         script.write(notify_job_start_cmd)
-        # Execute the singularity command
-        script.write(f'{singularity_run_cmd}\n')
+        script.write('\n# Extract the exact CPUs Slurm assigned to this job\n')
+        script.write('CPUSET=$(python3 -c "import os; cpus=sorted(os.sched_getaffinity(0)); print(\',\'.join(map(str,cpus)))")\n')
+        script.write('echo "Job isolated to CPUs: $CPUSET"\n\n')
+
+        # inject the --cpuset-cpus flag into the Singularity command
+        if "singularity run" in singularity_run_cmd:
+            modified_singularity_run_cmd = singularity_run_cmd.replace("singularity run", 'singularity run --cpuset-cpus "${CPUSET}"')
+        elif "singularity exec" in singularity_run_cmd:
+            modified_singularity_run_cmd = singularity_run_cmd.replace("singularity exec", 'singularity exec --cpuset-cpus "${CPUSET}"')
+        else:
+            modified_singularity_run_cmd = singularity_run_cmd
+
+        script.write(f'{modified_singularity_run_cmd}\n')
 
         # Check if the command was successful and set the job status accordingly
         script.write('if [ $? -eq 0 ]; then\n')
