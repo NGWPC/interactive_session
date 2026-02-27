@@ -154,7 +154,7 @@ def write_slurm_script(run_id, job_type, input_file_local, output_file_local, si
 
         script.write(notify_job_start_cmd)
         script.write('\n# Extract the exact CPUs Slurm assigned to this job\n')
-        script.write('CPUSET=$(python3 -c "import os; cpus=sorted(os.sched_getaffinity(0)); print(\',\'.join(map(str,cpus)))")\n')
+        script.write('CPUSET=$(python3 -c "import os; print(*sorted(os.sched_getaffinity(0)), sep=\',\')")\n')
         script.write('echo "Job isolated to CPUs: $CPUSET"\n\n')
 
         # inject the --cpuset-cpus flag into the Singularity command
