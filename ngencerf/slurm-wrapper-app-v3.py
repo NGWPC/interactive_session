@@ -72,6 +72,7 @@ def write_callback(callbacks_dir, callback_command):
 
     logger.info(f'Writing callback script {callback_file_path}')
 
+
 def ensure_file_owned(file_path: str):
     try:
         # Get the current user's UID and GID
