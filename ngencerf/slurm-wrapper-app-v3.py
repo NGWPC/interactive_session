@@ -158,13 +158,9 @@ def write_slurm_script(run_id, job_type, input_file_local, output_file_local, si
         script.write('CPUSET=$(python3 -c "import os; print(*sorted(os.sched_getaffinity(0)), sep=\',\')")\n')
         script.write('echo "Job isolated to CPUs: $CPUSET"\n\n')
 
-        # inject the --cpuset-cpus flag into the Singularity command
-        if "singularity run" in singularity_run_cmd:
-            modified_singularity_run_cmd = singularity_run_cmd.replace("singularity run", 'singularity run --cpuset-cpus "${CPUSET}"')
-        elif "singularity exec" in singularity_run_cmd:
-            modified_singularity_run_cmd = singularity_run_cmd.replace("singularity exec", 'singularity exec --cpuset-cpus "${CPUSET}"')
-        else:
-            modified_singularity_run_cmd = singularity_run_cmd
+        # prefix the command with taskset to enforce CPU isolation at the kernel level
+        # avoids the rootless cgroups v2 requirement while keeping mpirun contained
+        modified_singularity_run_cmd = f'taskset -c "${{CPUSET}}" {singularity_run_cmd}'
 
         script.write(f'{modified_singularity_run_cmd}\n')
 
