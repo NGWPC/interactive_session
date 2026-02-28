@@ -158,6 +158,9 @@ def write_slurm_script(run_id, job_type, input_file_local, output_file_local, si
         script.write('CPUSET=$(python3 -c "import os; print(*sorted(os.sched_getaffinity(0)), sep=\',\')")\n')
         script.write('echo "Job isolated to CPUs: $CPUSET"\n\n')
 
+        # Set the OpenMPI environment variable so it allows multiple cores for 1 task
+        script.write('export SINGULARITYENV_OMPI_MCA_rmaps_base_oversubscribe=1\n\n')
+
         # prefix the command with taskset to enforce CPU isolation at the kernel level
         # avoids the rootless cgroups v2 requirement while keeping mpirun contained
         modified_singularity_run_cmd = f'taskset -c "${{CPUSET}}" {singularity_run_cmd}'
