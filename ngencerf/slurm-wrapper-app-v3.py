@@ -72,6 +72,7 @@ def write_callback(callbacks_dir, callback_command):
 
     logger.info(f'Writing callback script {callback_file_path}')
 
+
 def ensure_file_owned(file_path: str):
     try:
         # Get the current user's UID and GID
@@ -108,7 +109,13 @@ def write_slurm_script(run_id, job_type, input_file_local, output_file_local, si
         script.write(f'#SBATCH --job-name={job_type}-{run_id}\n')
         script.write('#SBATCH --nodes=1\n')
         script.write('#SBATCH --no-requeue\n')
-        script.write(f'#SBATCH --ntasks-per-node={nprocs}\n')
+        # using a single task for the full slurm job
+        script.write('#SBATCH --ntasks=1\n')
+        # set cpus-per-task to the nprocs value we get
+        # from the /submit-validation-job call
+        # so that Slurm allocates the right number of cores
+        # for this task
+        script.write(f'#SBATCH --cpus-per-task={nprocs}\n')
         script.write(f'#SBATCH --output={output_file_local}\n')
         script.write('\n')
 
@@ -147,8 +154,18 @@ def write_slurm_script(run_id, job_type, input_file_local, output_file_local, si
         )
 
         script.write(notify_job_start_cmd)
-        # Execute the singularity command
-        script.write(f'{singularity_run_cmd}\n')
+        script.write('\n# Extract the exact CPUs Slurm assigned to this job\n')
+        script.write('CPUSET=$(python3 -c "import os; print(*sorted(os.sched_getaffinity(0)), sep=\',\')")\n')
+        script.write('echo "Job isolated to CPUs: $CPUSET"\n\n')
+
+        # Set the OpenMPI environment variable so it allows multiple cores for 1 task
+        script.write('export SINGULARITYENV_OMPI_MCA_rmaps_base_oversubscribe=1\n\n')
+
+        # prefix the command with taskset to enforce CPU isolation at the kernel level
+        # avoids the rootless cgroups v2 requirement while keeping mpirun contained
+        modified_singularity_run_cmd = f'taskset -c "${{CPUSET}}" {singularity_run_cmd}'
+
+        script.write(f'{modified_singularity_run_cmd}\n')
 
         # Check if the command was successful and set the job status accordingly
         script.write('if [ $? -eq 0 ]; then\n')
@@ -596,7 +613,7 @@ def job_status():
         return log_and_return_error("Job not found", 404)
     except Exception as e:
         return log_and_return_error(str(e), 500)
-        
+
 
 @app.route('/cancel-job', methods=['POST'])
 def cancel_job():
