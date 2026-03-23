@@ -423,7 +423,7 @@ def submit_forecast_job():
     realization_file = request.form.get('realization_file')
     # Path to the SLURM job log file in the controller node
     stdout_file = request.form.get('stdout_file')
-    # Path to the SLURM job log file in the controller node
+
     auth_token = request.form.get('auth_token')
 
     if not forecast_run_id:
@@ -461,6 +461,82 @@ def submit_forecast_job():
         return log_and_return_error(str(e), status_code=500)
 
     slurm_job_id, exit_code = submit_job(validation_yaml, stdout_file, forecast_run_id, job_type, singularity_run_cmd)
+    if exit_code == 500:
+        return jsonify({"error": slurm_job_id}), exit_code
+
+    return jsonify({"slurm_job_id": slurm_job_id}), exit_code
+
+
+@app.route('/submit-hindcast-job', methods=['POST'])
+def submit_hindcast_job():
+    logging.info("submit-hindcast-job - Received POST request with the following parameters:")
+    for key, value in request.form.items():
+        logging.info(f"{key}: {value}")
+
+    job_type = 'hindcast'
+    # job id
+    hindcast_run_id = request.form.get('hindcast_run_id')
+    # validation yaml
+    validation_yaml = request.form.get('validation_yaml')
+
+    config_file = request.form.get('config_file')
+    run_name = request.form.get('run_name')
+    interval_cycle = request.form.get('interval_cycle')
+    num_iterations = request.form.get('num_iterations')
+    use_state = request.form.get('use_state')
+
+    # Path to the SLURM job log file in the controller node
+    stdout_file = request.form.get('stdout_file')
+    # Path to the SLURM job log file in the controller node
+    auth_token = request.form.get('auth_token')
+
+    if not hindcast_run_id:
+        return log_and_return_error("No hindcast_run_id provided", status_code=400)
+
+    if not validation_yaml:
+        return log_and_return_error("No validation_yaml provided", status_code=400)
+
+    if not config_file:
+        return log_and_return_error("No config_file provided", status_code=400)
+
+    if not run_name:
+        return log_and_return_error("No run_name provided", status_code=400)
+    
+    if not interval_cycle:
+        return log_and_return_error("No interval_cycle provided", status_code=400)
+
+    if not num_iterations:
+        return log_and_return_error("No num_iterations provided", status_code=400)
+
+    if not use_state:
+        return log_and_return_error("No use_state provided", status_code=400)
+
+    if not stdout_file:
+        return log_and_return_error("No stdout_file provided", status_code=400)
+
+    if not auth_token:
+        return log_and_return_error("No auth_token provided", status_code=400)
+
+    singularity_run_cmd = f"{SINGULARITY_RUN_NWM_FCST_MGR_CMD} hindcast {validation_yaml} {config_file} {run_name} {interval_cycle} {num_iterations} {use_state}"
+
+    callbacks_dir = os.path.join(CALLBACKS_DIR, job_type, hindcast_run_id)
+
+    try:
+        # Get callback
+        callback = get_callback(
+            callbacks_dir,
+            f'http://{CONTROLLER_HOSTNAME}:8000/calibration/hindcast_job_slurm_callback/',
+            auth_token,
+            hindcast_run_id=hindcast_run_id,
+            job_status="__job_status__"
+        )
+
+        write_callback(callbacks_dir, callback)
+
+    except Exception as e:
+        return log_and_return_error(str(e), status_code=500)
+
+    slurm_job_id, exit_code = submit_job(validation_yaml, stdout_file, hindcast_run_id, job_type, singularity_run_cmd)
     if exit_code == 500:
         return jsonify({"error": slurm_job_id}), exit_code
 
