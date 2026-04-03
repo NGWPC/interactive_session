@@ -272,7 +272,7 @@ echo "Using Tag: $NGENCERF_UI_TAG"
 # Silence the expected orphan warning for multi-file projects
 export COMPOSE_IGNORE_ORPHANS=True
 
-if [[ "${service_build}" == "true" ]]; then
+if [[ "${service_build_server}" == "true" ]]; then
   # build locally and start ngencerf-server
   CACHE_BUST=$(date +%s) docker compose \
     --project-name ${service_name} \
@@ -281,13 +281,6 @@ if [[ "${service_build}" == "true" ]]; then
     --env-file ${service_ngencerf_server_dir}/cerfServer/.env-override \
     --file ${service_ngencerf_server_dir}/production-pw.yaml \
     up --detach --build ngencerf-services
-
-  # build locally and start ngencerf-ui
-  docker compose \
-    --project-name ${service_name} \
-    --project-directory ${service_ngencerf_ui_dir} \
-    --file ${service_ngencerf_ui_dir}/production-pw.yaml \
-    up --detach --build --no-deps ngencerf-app
 
 else
   # start ngencerf-server
@@ -298,7 +291,16 @@ else
     --env-file ${service_ngencerf_server_dir}/cerfServer/.env-override \
     --file ${service_ngencerf_server_dir}/production-pw.yaml \
     up --detach --no-build --pull never ngencerf-services
+fi
 
+if [[ "${service_build_ui}" == "true" ]]; then
+  # build locally and start ngencerf-ui
+  docker compose \
+    --project-name ${service_name} \
+    --project-directory ${service_ngencerf_ui_dir} \
+    --file ${service_ngencerf_ui_dir}/production-pw.yaml \
+    up --detach --build --no-deps ngencerf-app
+else
   # start ngencerf-ui
   docker compose \
     --project-name ${service_name} \
