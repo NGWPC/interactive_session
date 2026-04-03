@@ -252,11 +252,16 @@ jobs:
             type: string
             hidden: true
             default: ngencerf
-          build:
-            label: Build Docker Containers?
+          build_server:
+            label: Build ngencerf-server container?
             type: boolean
             default: true
-            tooltip: Select Yes to build the docker container running docker compose up --build
+            tooltip: Select Yes to build the ngencerf-server Docker container running docker compose up --build
+          build_ui:
+            label: Build ngencerf-ui container?
+            type: boolean
+            default: true
+            tooltip: Select Yes to build the ngencerf-ui Docker container running docker compose up --build
           ngencerf_server_dir:
             label: Directory with ngencerf-server
             type: string
