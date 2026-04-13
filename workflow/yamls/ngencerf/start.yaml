@@ -196,11 +196,6 @@ jobs:
         type: string
         default: /ngencerf-app/singularity/nwm-cal-mgr.sif
         hidden: true
-      ngen_bmi_forcing_singularity_container_path:
-        label: Path to the ngen-forcing singularity container
-        type: string
-        default: /ngencerf-app/singularity/ngen-bmi-forcing.sif
-        hidden: true
       nwm_fcst_mgr_singularity_container_path:
         label: Path to the nwm-fcst-mgr singularity container
         type: string
