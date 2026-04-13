@@ -51,10 +51,6 @@ if ! [ -f "${nwm_cal_mgr_singularity_container_path}" ]; then
    displayErrorMessage "nwm-cal-mgr singularity container was not found ${nwm_cal_mgr_singularity_container_path}"
 fi
 
-if ! [ -f "${ngen_bmi_forcing_singularity_container_path}" ]; then
-   displayErrorMessage "ngen-bmi-forcing singularity container was not found ${ngen_bmi_forcing_singularity_container_path}"
-fi
-
 if ! [ -f "${nwm_fcst_mgr_singularity_container_path}" ]; then
    displayErrorMessage "nwm-fcst-mgr singularity container was not found ${nwm_fcst_mgr_singularity_container_path}"
 fi

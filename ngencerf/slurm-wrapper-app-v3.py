@@ -25,8 +25,6 @@ CALLBACKS_DIR = os.path.join(LOCAL_DATA_DIR, "slurm-callbacks", "pending")
 # Path to the singularity container with ngen-cal
 NWM_CAL_MGR_SINGULARITY_CONTAINER_PATH = os.environ.get('nwm_cal_mgr_singularity_container_path')
 # Path to the singularity container with ngen-forcing
-NGEN_BMI_FORCING_SINGULARITY_CONTAINER_PATH = os.environ.get('ngen_bmi_forcing_singularity_container_path')
-# Path to the singularity container with ngen-forcing
 NWM_FCST_MGR_SINGULARITY_CONTAINER_PATH = os.environ.get('nwm_fcst_mgr_singularity_container_path')
 # Path to the nwm_verf singularity container
 NWM_VERF_SINGULARITY_CONTAINER_PATH = os.environ.get('nwm_verf_singularity_container_path')
@@ -34,7 +32,6 @@ NWM_VERF_SINGULARITY_CONTAINER_PATH = os.environ.get('nwm_verf_singularity_conta
 NGENCERF_URL = f"http://{CONTROLLER_HOSTNAME}:8000"
 # Command to launch singularity
 SINGULARITY_RUN_NWM_CAL_MGR_CMD = f"/usr/bin/time -v singularity run -B {LOCAL_DATA_DIR}:{CONTAINER_DATA_DIR} --env NGENCERF_URL={NGENCERF_URL} {NWM_CAL_MGR_SINGULARITY_CONTAINER_PATH}"
-SINGULARITY_RUN_NGEN_BMI_FORCING_CMD = f"/usr/bin/time -v singularity exec -B {LOCAL_DATA_DIR}:{CONTAINER_DATA_DIR} --env NGENCERF_URL={NGENCERF_URL} {NGEN_BMI_FORCING_SINGULARITY_CONTAINER_PATH} /ngen-app/bin/run-ngen-forcing.sh"
 SINGULARITY_RUN_NWM_FCST_MGR_CMD = f"/usr/bin/time -v singularity run -B {LOCAL_DATA_DIR}:{CONTAINER_DATA_DIR} --env NGENCERF_URL={NGENCERF_URL} {NWM_FCST_MGR_SINGULARITY_CONTAINER_PATH}"
 SINGULARITY_RUN_NWM_VERF_CMD = f"/usr/bin/time -v singularity run -B {LOCAL_DATA_DIR}:{CONTAINER_DATA_DIR} --env NGENCERF_URL={NGENCERF_URL} {NWM_VERF_SINGULARITY_CONTAINER_PATH}"
 
