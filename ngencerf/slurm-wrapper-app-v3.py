@@ -22,18 +22,31 @@ LOCAL_DATA_DIR = os.environ.get('local_data_dir')  # "/ngencerf-app/data/ngen-ca
 CONTAINER_DATA_DIR = os.environ.get('container_data_dir')  # "/ngencerf/data/"
 # Callback dir
 CALLBACKS_DIR = os.path.join(LOCAL_DATA_DIR, "slurm-callbacks", "pending")
-# Path to the singularity container with ngen-cal
-NWM_CAL_MGR_SINGULARITY_CONTAINER_PATH = os.environ.get('nwm_cal_mgr_singularity_container_path')
-# Path to the singularity container with ngen-forcing
-NWM_FCST_MGR_SINGULARITY_CONTAINER_PATH = os.environ.get('nwm_fcst_mgr_singularity_container_path')
-# Path to the nwm_verf singularity container
-NWM_VERF_SINGULARITY_CONTAINER_PATH = os.environ.get('nwm_verf_singularity_container_path')
+# Docker image ref (registry/name:tag) for nwm-cal-mgr, set by start-template-v3.sh from the per-cluster tag file
+NWM_CAL_MGR_DOCKER_IMAGE = os.environ.get('nwm_cal_mgr_docker_image')
+# Docker image ref for nwm-fcst-mgr
+NWM_FCST_MGR_DOCKER_IMAGE = os.environ.get('nwm_fcst_mgr_docker_image')
+# Docker image ref for nwm-verf
+NWM_VERF_DOCKER_IMAGE = os.environ.get('nwm_verf_docker_image')
 # URL to callback from ngencal to the other services
 NGENCERF_URL = f"http://{CONTROLLER_HOSTNAME}:8000"
-# Command to launch singularity
-SINGULARITY_RUN_NWM_CAL_MGR_CMD = f"/usr/bin/time -v singularity run -B {LOCAL_DATA_DIR}:{CONTAINER_DATA_DIR} --env NGENCERF_URL={NGENCERF_URL} {NWM_CAL_MGR_SINGULARITY_CONTAINER_PATH}"
-SINGULARITY_RUN_NWM_FCST_MGR_CMD = f"/usr/bin/time -v singularity run -B {LOCAL_DATA_DIR}:{CONTAINER_DATA_DIR} --env NGENCERF_URL={NGENCERF_URL} {NWM_FCST_MGR_SINGULARITY_CONTAINER_PATH}"
-SINGULARITY_RUN_NWM_VERF_CMD = f"/usr/bin/time -v singularity run -B {LOCAL_DATA_DIR}:{CONTAINER_DATA_DIR} --env NGENCERF_URL={NGENCERF_URL} {NWM_VERF_SINGULARITY_CONTAINER_PATH}"
+
+# Docker run templates. ${CPUSET} is resolved by bash at runtime from sched_getaffinity.
+# --cpuset-cpus replaces the old `taskset` prefix (taskset does not propagate CPU pinning
+# across the dockerd boundary into the container). --user preserves singularity's
+# calling-user semantics so files under $LOCAL_DATA_DIR keep the same ownership.
+_DOCKER_RUN_BASE = (
+    f'/usr/bin/time -v docker run --rm '
+    f'--cpuset-cpus="${{CPUSET}}" '
+    f'--user $(id -u):$(id -g) '
+    f'--network host '
+    f'-v {LOCAL_DATA_DIR}:{CONTAINER_DATA_DIR} '
+    f'-e NGENCERF_URL={NGENCERF_URL} '
+    f'-e OMPI_MCA_rmaps_base_oversubscribe=1'
+)
+DOCKER_RUN_NWM_CAL_MGR_CMD = f"{_DOCKER_RUN_BASE} {NWM_CAL_MGR_DOCKER_IMAGE}"
+DOCKER_RUN_NWM_FCST_MGR_CMD = f"{_DOCKER_RUN_BASE} {NWM_FCST_MGR_DOCKER_IMAGE}"
+DOCKER_RUN_NWM_VERF_CMD = f"{_DOCKER_RUN_BASE} {NWM_VERF_DOCKER_IMAGE}"
 
 # Slurm job metrics for sacct command
 SLURM_JOB_METRICS = os.environ.get('SLURM_JOB_METRICS')
@@ -90,7 +103,7 @@ def ensure_file_owned(file_path: str):
         return {"success": False, "message": str(e)}
 
 
-def write_slurm_script(run_id, job_type, input_file_local, output_file_local, singularity_run_cmd, nprocs = 1):
+def write_slurm_script(run_id, job_type, input_file_local, output_file_local, docker_run_cmd, nprocs = 1):
     job_script = output_file_local.rsplit('.', 1)[0] + '.slurm.sh'
     job_dir = os.path.dirname(os.path.dirname(input_file_local))
     callbacks_dir = os.path.join(CALLBACKS_DIR, job_type, run_id)
@@ -151,18 +164,13 @@ def write_slurm_script(run_id, job_type, input_file_local, output_file_local, si
         )
 
         script.write(notify_job_start_cmd)
-        script.write('\n# Extract the exact CPUs Slurm assigned to this job\n')
+        script.write('\n# Extract the exact CPUs Slurm assigned to this job.\n')
+        script.write('# Passed to docker via --cpuset-cpus in the docker run template; taskset cannot\n')
+        script.write('# propagate pinning across dockerd into the container.\n')
         script.write('CPUSET=$(python3 -c "import os; print(*sorted(os.sched_getaffinity(0)), sep=\',\')")\n')
         script.write('echo "Job isolated to CPUs: $CPUSET"\n\n')
 
-        # Set the OpenMPI environment variable so it allows multiple cores for 1 task
-        script.write('export SINGULARITYENV_OMPI_MCA_rmaps_base_oversubscribe=1\n\n')
-
-        # prefix the command with taskset to enforce CPU isolation at the kernel level
-        # avoids the rootless cgroups v2 requirement while keeping mpirun contained
-        modified_singularity_run_cmd = f'taskset -c "${{CPUSET}}" {singularity_run_cmd}'
-
-        script.write(f'{modified_singularity_run_cmd}\n')
+        script.write(f'{docker_run_cmd}\n')
 
         # Check if the command was successful and set the job status accordingly
         script.write('if [ $? -eq 0 ]; then\n')
@@ -228,7 +236,7 @@ def squeue_job_status(slurm_job_id):
     return squeue_status, None
 
 
-def submit_job(input_file, output_file, run_id, job_type, singularity_run_cmd, nprocs = 1, partition = None):
+def submit_job(input_file, output_file, run_id, job_type, docker_run_cmd, nprocs = 1, partition = None):
     logger.info(f"Starting job submission for job run ID: {run_id}")
     # Check the file exists on the shared file system
     # Path to the input file on the shared file system
@@ -242,7 +250,7 @@ def submit_job(input_file, output_file, run_id, job_type, singularity_run_cmd, n
 
     try:
         # Save the script to the job's directory
-        job_script = write_slurm_script(run_id, job_type, input_file_local, output_file_local, singularity_run_cmd, nprocs = nprocs)
+        job_script = write_slurm_script(run_id, job_type, input_file_local, output_file_local, docker_run_cmd, nprocs = nprocs)
         logger.info(f"Job script written to: {job_script}")
 
         # Submit the job and retrieve SLURM job ID
@@ -295,7 +303,7 @@ def submit_calibration_job():
         if node_type not in PARTITIONS:
             return log_and_return_error(f"node_type {node_type} provided does not match any partitions {PARTITIONS_STR}", status_code=400)
 
-    singularity_run_cmd = f"{SINGULARITY_RUN_NWM_CAL_MGR_CMD} calibration {input_file}"
+    docker_run_cmd = f"{DOCKER_RUN_NWM_CAL_MGR_CMD} calibration {input_file}"
 
     callbacks_dir = os.path.join(CALLBACKS_DIR, job_type, calibration_run_id)
 
@@ -314,7 +322,7 @@ def submit_calibration_job():
     except Exception as e:
         return log_and_return_error(str(e), 500)
 
-    slurm_job_id, exit_code = submit_job(input_file, output_file, calibration_run_id, job_type, singularity_run_cmd, nprocs = nprocs, partition = node_type)
+    slurm_job_id, exit_code = submit_job(input_file, output_file, calibration_run_id, job_type, docker_run_cmd, nprocs = nprocs, partition = node_type)
     if exit_code == 500:
         return jsonify({"error": slurm_job_id}), exit_code
 
@@ -376,9 +384,9 @@ def submit_validation_job():
             return log_and_return_error("Invalid iteration provided; must be an integer", status_code=400)
 
     if validation_type in ['valid_control', 'valid_best']:
-        singularity_run_cmd = f"{SINGULARITY_RUN_NWM_CAL_MGR_CMD} validation {input_file}"
+        docker_run_cmd = f"{DOCKER_RUN_NWM_CAL_MGR_CMD} validation {input_file}"
     elif validation_type == 'valid_iteration':
-        singularity_run_cmd = f"{SINGULARITY_RUN_NWM_CAL_MGR_CMD} validation_iteration {input_file} {worker_name} {iteration}"
+        docker_run_cmd = f"{DOCKER_RUN_NWM_CAL_MGR_CMD} validation_iteration {input_file} {worker_name} {iteration}"
     else:
         return log_and_return_error("Invalid validation_type provided; must be one of 'valid_control', 'valid_best', or 'valid_iteration'", status_code = 400)
 
@@ -399,7 +407,7 @@ def submit_validation_job():
     except Exception as e:
         return log_and_return_error(str(e), status_code=500)
 
-    slurm_job_id, exit_code = submit_job(input_file, output_file, validation_run_id, job_type, singularity_run_cmd, nprocs=nprocs, partition = node_type)
+    slurm_job_id, exit_code = submit_job(input_file, output_file, validation_run_id, job_type, docker_run_cmd, nprocs=nprocs, partition = node_type)
     if exit_code == 500:
         return jsonify({"error": slurm_job_id}), exit_code
     return jsonify({"slurm_job_id": slurm_job_id}), exit_code
@@ -438,7 +446,7 @@ def submit_forecast_job():
     if not auth_token:
         return log_and_return_error("No auth_token provided", status_code=400)
 
-    singularity_run_cmd = f"{SINGULARITY_RUN_NWM_FCST_MGR_CMD} forecast {validation_yaml} {realization_file}"
+    docker_run_cmd = f"{DOCKER_RUN_NWM_FCST_MGR_CMD} forecast {validation_yaml} {realization_file}"
 
     callbacks_dir = os.path.join(CALLBACKS_DIR, job_type, forecast_run_id)
 
@@ -457,7 +465,7 @@ def submit_forecast_job():
     except Exception as e:
         return log_and_return_error(str(e), status_code=500)
 
-    slurm_job_id, exit_code = submit_job(validation_yaml, stdout_file, forecast_run_id, job_type, singularity_run_cmd)
+    slurm_job_id, exit_code = submit_job(validation_yaml, stdout_file, forecast_run_id, job_type, docker_run_cmd)
     if exit_code == 500:
         return jsonify({"error": slurm_job_id}), exit_code
 
@@ -514,7 +522,7 @@ def submit_hindcast_job():
     if not auth_token:
         return log_and_return_error("No auth_token provided", status_code=400)
 
-    singularity_run_cmd = f"{SINGULARITY_RUN_NWM_FCST_MGR_CMD} hindcast {validation_yaml} {config_file} {run_name} {interval_cycle} {num_iterations} {use_state}"
+    docker_run_cmd = f"{DOCKER_RUN_NWM_FCST_MGR_CMD} hindcast {validation_yaml} {config_file} {run_name} {interval_cycle} {num_iterations} {use_state}"
 
     callbacks_dir = os.path.join(CALLBACKS_DIR, job_type, hindcast_run_id)
 
@@ -533,7 +541,7 @@ def submit_hindcast_job():
     except Exception as e:
         return log_and_return_error(str(e), status_code=500)
 
-    slurm_job_id, exit_code = submit_job(validation_yaml, stdout_file, hindcast_run_id, job_type, singularity_run_cmd)
+    slurm_job_id, exit_code = submit_job(validation_yaml, stdout_file, hindcast_run_id, job_type, docker_run_cmd)
     if exit_code == 500:
         return jsonify({"error": slurm_job_id}), exit_code
 
@@ -573,7 +581,7 @@ def submit_cold_start_job():
     if not auth_token:
         return log_and_return_error("No auth_token provided", status_code=400)
 
-    singularity_run_cmd = f"{SINGULARITY_RUN_NWM_FCST_MGR_CMD} cold_start {validation_yaml} {realization_file}"
+    docker_run_cmd = f"{DOCKER_RUN_NWM_FCST_MGR_CMD} cold_start {validation_yaml} {realization_file}"
 
     callbacks_dir = os.path.join(CALLBACKS_DIR, job_type, cold_start_run_id)
 
@@ -592,7 +600,7 @@ def submit_cold_start_job():
     except Exception as e:
         return log_and_return_error(str(e), status_code=500)
 
-    slurm_job_id, exit_code = submit_job(validation_yaml, stdout_file, cold_start_run_id, job_type, singularity_run_cmd)
+    slurm_job_id, exit_code = submit_job(validation_yaml, stdout_file, cold_start_run_id, job_type, docker_run_cmd)
     if exit_code == 500:
         return jsonify({"error": slurm_job_id}), exit_code
 
@@ -627,7 +635,7 @@ def submit_verification_job():
     if not auth_token:
         return log_and_return_error("No auth_token provided", status_code=400)
 
-    singularity_run_cmd = f"{SINGULARITY_RUN_NWM_VERF_CMD} verification {verification_config}"
+    docker_run_cmd = f"{DOCKER_RUN_NWM_VERF_CMD} verification {verification_config}"
 
     callbacks_dir = os.path.join(CALLBACKS_DIR, job_type, verification_run_id)
 
@@ -646,7 +654,7 @@ def submit_verification_job():
     except Exception as e:
         return log_and_return_error(str(e), status_code=500)
 
-    slurm_job_id, exit_code = submit_job(verification_config, stdout_file, verification_run_id, job_type, singularity_run_cmd)
+    slurm_job_id, exit_code = submit_job(verification_config, stdout_file, verification_run_id, job_type, docker_run_cmd)
     if exit_code == 500:
         return jsonify({"error": slurm_job_id}), exit_code
 

@@ -47,17 +47,34 @@ if ! [ -f "${service_nginx_sif}" ]; then
    displayErrorMessage "NGINX proxy singularity container was not found ${service_nginx_sif}"
 fi
 
-if ! [ -f "${nwm_cal_mgr_singularity_container_path}" ]; then
-   displayErrorMessage "nwm-cal-mgr singularity container was not found ${nwm_cal_mgr_singularity_container_path}"
+# NWM docker image tags are read from a per-cluster config file on shared storage.
+# Operators: atomically replace this file (write temp + mv -f) — do not edit in place.
+# Supported keys: NWM_CAL_MGR_TAG, NWM_FCST_MGR_TAG, NWM_VERF_TAG, NGWPC_IMAGE_REGISTRY
+TAG_FILE="/ngencerf-app/config/docker-tags.env"
+if [ -r "$TAG_FILE" ]; then
+    echo "Loading image tags from $TAG_FILE"
+    set -a
+    # shellcheck disable=SC1090
+    source "$TAG_FILE"
+    set +a
+else
+    echo "warn: $TAG_FILE not found; falling back to 'latest' for all NWM images"
 fi
 
-if ! [ -f "${nwm_fcst_mgr_singularity_container_path}" ]; then
-   displayErrorMessage "nwm-fcst-mgr singularity container was not found ${nwm_fcst_mgr_singularity_container_path}"
-fi
+IMAGE_REGISTRY="${NGWPC_IMAGE_REGISTRY:-ghcr.io/ngwpc}"
+NWM_CAL_MGR_TAG="${NWM_CAL_MGR_TAG:-latest}"
+NWM_FCST_MGR_TAG="${NWM_FCST_MGR_TAG:-latest}"
+NWM_VERF_TAG="${NWM_VERF_TAG:-latest}"
 
-if ! [ -f "${nwm_verf_singularity_container_path}" ]; then
-   displayErrorMessage "nwm-verf singularity container was not found ${nwm_verf_singularity_container_path}"
-fi
+# Exported for slurm-wrapper-app-v3.py to consume via os.environ.get.
+export nwm_cal_mgr_docker_image="${IMAGE_REGISTRY}/nwm-cal-mgr:${NWM_CAL_MGR_TAG}"
+export nwm_fcst_mgr_docker_image="${IMAGE_REGISTRY}/nwm-fcst-mgr:${NWM_FCST_MGR_TAG}"
+export nwm_verf_docker_image="${IMAGE_REGISTRY}/nwm-verf:${NWM_VERF_TAG}"
+
+echo "Resolved NWM docker images:"
+echo "  nwm-cal-mgr:  ${nwm_cal_mgr_docker_image}"
+echo "  nwm-fcst-mgr: ${nwm_fcst_mgr_docker_image}"
+echo "  nwm-verf:     ${nwm_verf_docker_image}"
 
 #################
 # NGINX WRAPPER #
