@@ -41,6 +41,7 @@ _DOCKER_RUN_BASE = (
     f'--user $(id -u):$(id -g) '
     f'--network host '
     f'-v {LOCAL_DATA_DIR}:{CONTAINER_DATA_DIR} '
+    f'-e HOME=/tmp '
     f'-e NGENCERF_URL={NGENCERF_URL} '
     f'-e OMPI_MCA_rmaps_base_oversubscribe=1'
 )
