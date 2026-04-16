@@ -41,6 +41,7 @@ _DOCKER_RUN_BASE = (
     f'--user $(id -u):$(id -g) '
     f'--network host '
     f'-v {LOCAL_DATA_DIR}:{CONTAINER_DATA_DIR} '
+    f'-v /tmp/docker_passwd_${{SLURM_JOB_ID}}:/etc/passwd:ro '
     f'-e HOME=/tmp '
     f'-e NGENCERF_URL={NGENCERF_URL} '
     f'-e OMPI_MCA_rmaps_base_oversubscribe=1'
@@ -171,7 +172,12 @@ def write_slurm_script(run_id, job_type, input_file_local, output_file_local, do
         script.write('CPUSET=$(python3 -c "import os; print(*sorted(os.sched_getaffinity(0)), sep=\',\')")\n')
         script.write('echo "Job isolated to CPUs: $CPUSET"\n\n')
 
+        script.write('# Create a passwd entry so --user has a valid HOME inside the container.\n')
+        script.write('# Without this, uid has no /etc/passwd entry and HOME defaults to /.\n')
+        script.write('printf "root:x:0:0:root:/root:/bin/bash\\nnobody:x:65534:65534:nobody:/nonexistent:/usr/sbin/nologin\\npwuser:x:%s:%s:pwuser:/tmp:/bin/bash\\n" "$(id -u)" "$(id -g)" > /tmp/docker_passwd_${SLURM_JOB_ID}\n\n')
+
         script.write(f'{docker_run_cmd}\n')
+        script.write('rm -f /tmp/docker_passwd_${SLURM_JOB_ID}\n\n')
 
         # Check if the command was successful and set the job status accordingly
         script.write('if [ $? -eq 0 ]; then\n')
