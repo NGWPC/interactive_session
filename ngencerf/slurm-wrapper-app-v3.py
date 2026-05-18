@@ -30,10 +30,15 @@ NWM_FCST_MGR_SINGULARITY_CONTAINER_PATH = os.environ.get('nwm_fcst_mgr_singulari
 NWM_VERF_SINGULARITY_CONTAINER_PATH = os.environ.get('nwm_verf_singularity_container_path')
 # URL to callback from ngencal to the other services
 NGENCERF_URL = f"http://{CONTROLLER_HOSTNAME}:8000"
-# Command to launch singularity
-SINGULARITY_RUN_NWM_CAL_MGR_CMD = f"/usr/bin/time -v singularity run -B {LOCAL_DATA_DIR}:{CONTAINER_DATA_DIR} --env NGENCERF_URL={NGENCERF_URL} {NWM_CAL_MGR_SINGULARITY_CONTAINER_PATH}"
-SINGULARITY_RUN_NWM_FCST_MGR_CMD = f"/usr/bin/time -v singularity run -B {LOCAL_DATA_DIR}:{CONTAINER_DATA_DIR} --env NGENCERF_URL={NGENCERF_URL} {NWM_FCST_MGR_SINGULARITY_CONTAINER_PATH}"
-SINGULARITY_RUN_NWM_VERF_CMD = f"/usr/bin/time -v singularity run -B {LOCAL_DATA_DIR}:{CONTAINER_DATA_DIR} --env NGENCERF_URL={NGENCERF_URL} {NWM_VERF_SINGULARITY_CONTAINER_PATH}"
+# Command to launch singularity.
+# --no-mount tmp gives the container a private /tmp instead of bind-mounting the
+# host's /tmp.  Combined with the SINGULARITYENV_TMPDIR set in the slurm script
+# below, this keeps PMIx shared-memory segments and cal-mgr's tempfile copies
+# off the compute node's local disk (which shares the volume with
+# /var/spool/slurmd -- the cause of the SlurmdSpoolDir-is-full failures).
+SINGULARITY_RUN_NWM_CAL_MGR_CMD = f"/usr/bin/time -v singularity run --no-mount tmp -B {LOCAL_DATA_DIR}:{CONTAINER_DATA_DIR} --env NGENCERF_URL={NGENCERF_URL} {NWM_CAL_MGR_SINGULARITY_CONTAINER_PATH}"
+SINGULARITY_RUN_NWM_FCST_MGR_CMD = f"/usr/bin/time -v singularity run --no-mount tmp -B {LOCAL_DATA_DIR}:{CONTAINER_DATA_DIR} --env NGENCERF_URL={NGENCERF_URL} {NWM_FCST_MGR_SINGULARITY_CONTAINER_PATH}"
+SINGULARITY_RUN_NWM_VERF_CMD = f"/usr/bin/time -v singularity run --no-mount tmp -B {LOCAL_DATA_DIR}:{CONTAINER_DATA_DIR} --env NGENCERF_URL={NGENCERF_URL} {NWM_VERF_SINGULARITY_CONTAINER_PATH}"
 
 # Slurm job metrics for sacct command
 SLURM_JOB_METRICS = os.environ.get('SLURM_JOB_METRICS')
@@ -157,6 +162,41 @@ def write_slurm_script(run_id, job_type, input_file_local, output_file_local, si
 
         # Set the OpenMPI environment variable so it allows multiple cores for 1 task
         script.write('export SINGULARITYENV_OMPI_MCA_rmaps_base_oversubscribe=1\n\n')
+
+        # Per-job scratch dir on the shared filesystem.  TMPDIR is honored by
+        # Python's tempfile module (cal-mgr's NamedTemporaryFile netCDF copies)
+        # and by PMIx (OpenMPI dstore shared-memory segments).  Together with
+        # --no-mount tmp on the singularity command, this keeps the compute
+        # node's local /tmp + /var/spool/slurmd volume from filling up.
+        # Label includes job_type + run_id for human greppability across all
+        # 7 job types (calibration, validation, validation_iteration, forecast,
+        # hindcast, cold_start, verification); SLURM_JOB_ID guarantees uniqueness.
+        scratch_root = os.path.join(LOCAL_DATA_DIR, 'scratch')
+        scratch_label = f'{job_type}-{run_id}-${{SLURM_JOB_ID}}'
+        host_scratch = os.path.join(scratch_root, scratch_label)
+        container_scratch = os.path.join(CONTAINER_DATA_DIR, 'scratch', scratch_label)
+
+        # Opportunistic sweep: the EXIT trap below covers normal exits and
+        # SIGTERM, but NOT SIGKILL or node crashes.  At the start of every
+        # job, mop up scratch dirs whose trailing SLURM_JOB_ID is no longer
+        # in squeue.  Errors are non-fatal (|| true) so the workload still
+        # runs if the sweep hits a permission issue.
+        script.write(f'mkdir -p "{scratch_root}"\n')
+        script.write(
+            f'(active=$(squeue -h -o \'%i\' 2>/dev/null | sort -u); '
+            # If squeue failed/returned empty, skip sweep -- do NOT nuke everything.
+            f'[ -n "$active" ] || exit 0; '
+            f'for d in "{scratch_root}"/*; do '
+            f'[ -d "$d" ] || continue; '
+            f'jobid="${{d##*-}}"; '
+            f'echo "$active" | grep -qx "$jobid" || rm -rf "$d"; '
+            f'done) || true\n'
+        )
+
+        script.write(f'export TMPDIR="{host_scratch}"\n')
+        script.write(f'export SINGULARITYENV_TMPDIR="{container_scratch}"\n')
+        script.write('mkdir -p "$TMPDIR"\n')
+        script.write('trap \'rm -rf "$TMPDIR"\' EXIT\n\n')
 
         # prefix the command with taskset to enforce CPU isolation at the kernel level
         # avoids the rootless cgroups v2 requirement while keeping mpirun contained
