@@ -30,7 +30,10 @@ NWM_FCST_MGR_SINGULARITY_CONTAINER_PATH = os.environ.get('nwm_fcst_mgr_singulari
 NWM_VERF_SINGULARITY_CONTAINER_PATH = os.environ.get('nwm_verf_singularity_container_path')
 # URL to callback from ngencal to the other services
 NGENCERF_URL = f"http://{CONTROLLER_HOSTNAME}:8000"
-# Command to launch singularity
+# Command to launch singularity.
+# Per-job binds (e.g. the /tmp -> EFS scratch bind)
+# are added via the SINGULARITY_BIND env var in write_slurm_script,
+# not baked into these constants.
 SINGULARITY_RUN_NWM_CAL_MGR_CMD = f"/usr/bin/time -v singularity run -B {LOCAL_DATA_DIR}:{CONTAINER_DATA_DIR} --env NGENCERF_URL={NGENCERF_URL} {NWM_CAL_MGR_SINGULARITY_CONTAINER_PATH}"
 SINGULARITY_RUN_NWM_FCST_MGR_CMD = f"/usr/bin/time -v singularity run -B {LOCAL_DATA_DIR}:{CONTAINER_DATA_DIR} --env NGENCERF_URL={NGENCERF_URL} {NWM_FCST_MGR_SINGULARITY_CONTAINER_PATH}"
 SINGULARITY_RUN_NWM_VERF_CMD = f"/usr/bin/time -v singularity run -B {LOCAL_DATA_DIR}:{CONTAINER_DATA_DIR} --env NGENCERF_URL={NGENCERF_URL} {NWM_VERF_SINGULARITY_CONTAINER_PATH}"
@@ -157,6 +160,51 @@ def write_slurm_script(run_id, job_type, input_file_local, output_file_local, si
 
         # Set the OpenMPI environment variable so it allows multiple cores for 1 task
         script.write('export SINGULARITYENV_OMPI_MCA_rmaps_base_oversubscribe=1\n\n')
+
+        # Per-job scratch dir on the shared filesystem (EFS).  Lives under
+        # LOCAL_DATA_DIR so it's also visible inside the container at
+        # ${CONTAINER_DATA_DIR}/scratch/<label> via the existing data-dir
+        # bind.  The container's /tmp is ALSO bind-mounted onto this same dir
+        # (via SINGULARITY_BIND below) so everything that writes to
+        # /tmp OR honors TMPDIR lands here:
+        #   - Hardcoded /tmp/* writes (e.g. ngen-forcing historical_forcing.py:150
+        #     writing ~70 MB NWM/AORC cache files) -> here via the /tmp bind.
+        #   - TMPDIR-aware code (Python tempfile, PMIx dstore, HDF5 swap) ->
+        #     here via SINGULARITYENV_TMPDIR=/tmp (which IS this dir).
+        # Label includes job_type + run_id for human greppability across all
+        # 7 job types (calibration, validation, validation_iteration, forecast,
+        # hindcast, cold_start, verification); SLURM_JOB_ID guarantees uniqueness.
+        scratch_root = os.path.join(LOCAL_DATA_DIR, 'scratch')
+        scratch_label = f'{job_type}-{run_id}-${{SLURM_JOB_ID}}'
+        host_scratch = os.path.join(scratch_root, scratch_label)
+
+        # Opportunistic sweep: the EXIT trap below covers normal exits and
+        # SIGTERM, but NOT SIGKILL or node crashes.  At the start of every
+        # job, mop up scratch dirs whose trailing SLURM_JOB_ID is no longer
+        # in squeue.  Errors are non-fatal (|| true) so the workload still
+        # runs if the sweep hits a permission issue.
+        script.write(f'mkdir -p "{scratch_root}"\n')
+        script.write(
+            f'(active=$(squeue -h -o \'%i\' 2>/dev/null | sort -u); '
+            # If squeue failed/returned empty, skip sweep -- do NOT nuke everything.
+            f'[ -n "$active" ] || exit 0; '
+            f'for d in "{scratch_root}"/*; do '
+            f'[ -d "$d" ] || continue; '
+            f'jobid="${{d##*-}}"; '
+            f'echo "$active" | grep -qx "$jobid" || rm -rf "$d"; '
+            f'done) || true\n'
+        )
+
+        script.write(f'export TMPDIR="{host_scratch}"\n')
+        # Bind the per-job scratch dir onto the container's /tmp via
+        # SINGULARITY_BIND (user binds override Singularity's default /tmp
+        # bind at the same target -- documented Singularity behavior).
+        # SINGULARITYENV_TMPDIR=/tmp ensures TMPDIR-aware code (Python
+        # tempfile, PMIx dstore) ALSO lands on the same EFS scratch dir.
+        script.write('export SINGULARITY_BIND="$TMPDIR:/tmp"\n')
+        script.write("export SINGULARITYENV_TMPDIR=/tmp\n")
+        script.write('mkdir -p "$TMPDIR"\n')
+        script.write('trap \'rm -rf "$TMPDIR"\' EXIT\n\n')
 
         # prefix the command with taskset to enforce CPU isolation at the kernel level
         # avoids the rootless cgroups v2 requirement while keeping mpirun contained
@@ -498,7 +546,7 @@ def submit_hindcast_job():
 
     if not run_name:
         return log_and_return_error("No run_name provided", status_code=400)
-    
+
     if not interval_cycle:
         return log_and_return_error("No interval_cycle provided", status_code=400)
 
