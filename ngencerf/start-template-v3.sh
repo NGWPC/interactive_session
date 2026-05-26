@@ -230,6 +230,7 @@ fi
 export pw_platform_host="${pw_platform_host}"
 export basepath="${basepath}"
 export ngencerf_port="${ngencerf_port}"
+export HOSTNAME=$(hostname)
 
 # get ngencerf-server tag to be used within compose files
 export NGENCERF_SERVER_TAG=$( \
