@@ -211,7 +211,6 @@ echo "cd ${service_ngencerf_server_dir}" >> cancel.sh
 echo "docker compose \
   --project-name ${service_name} \
   --project-directory ${service_ngencerf_server_dir} \
-  --env-file ${service_ngencerf_server_dir}/docker.env \
   --env-file ${service_ngencerf_server_dir}/cerfServer/.env-override \
   --file ${service_ngencerf_server_dir}/production-pw.yaml \
   down --remove-orphans" >> cancel.sh
@@ -274,7 +273,6 @@ if [[ "${service_build_server}" == "true" ]]; then
   CACHE_BUST=$(date +%s) docker compose \
     --project-name ${service_name} \
     --project-directory ${service_ngencerf_server_dir} \
-    --env-file ${service_ngencerf_server_dir}/docker.env \
     --env-file ${service_ngencerf_server_dir}/cerfServer/.env-override \
     --file ${service_ngencerf_server_dir}/production-pw.yaml \
     up --detach --build ngencerf-services
@@ -284,7 +282,6 @@ else
   CACHE_BUST=$(date +%s) docker compose \
     --project-name ${service_name} \
     --project-directory ${service_ngencerf_server_dir} \
-    --env-file ${service_ngencerf_server_dir}/docker.env \
     --env-file ${service_ngencerf_server_dir}/cerfServer/.env-override \
     --file ${service_ngencerf_server_dir}/production-pw.yaml \
     up --detach --no-build --pull never ngencerf-services
@@ -295,14 +292,14 @@ if [[ "${service_build_ui}" == "true" ]]; then
   docker compose \
     --project-name ${service_name} \
     --project-directory ${service_ngencerf_ui_dir} \
-    --file ${service_ngencerf_ui_dir}/production-pw.yaml \
+    --file ${service_ngencerf_ui_dir}/compose.yaml \
     up --detach --build --no-deps ngencerf-app
 else
   # start ngencerf-ui
   docker compose \
     --project-name ${service_name} \
     --project-directory ${service_ngencerf_ui_dir} \
-    --file ${service_ngencerf_ui_dir}/production-pw.yaml \
+    --file ${service_ngencerf_ui_dir}/compose.yaml \
     up --detach --no-build --pull never --no-deps ngencerf-app
 fi
 
@@ -310,7 +307,6 @@ fi
 ngencerf_image="$(docker compose \
   --project-name ${service_name} \
   --project-directory ${service_ngencerf_server_dir} \
-  --env-file ${service_ngencerf_server_dir}/docker.env \
   --env-file ${service_ngencerf_server_dir}/cerfServer/.env-override \
   --file ${service_ngencerf_server_dir}/production-pw.yaml \
   config | awk '/ngencerf-services/{flag=1} flag && /image:/{print $2; exit}')"
