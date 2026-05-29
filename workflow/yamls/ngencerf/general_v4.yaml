@@ -16,8 +16,8 @@ jobs:
       - name: Checkout
         uses: parallelworks/checkout
         with:
-          repo: https://github.com/parallelworks/interactive_session.git
-          branch: main
+          repo: https://github.com/avidalto/interactive_session.git
+          branch: development
           sparse_checkout:
             - ${{ inputs.service.name }}
       - name: Create Inputs
@@ -95,6 +95,7 @@ jobs:
           scheduler:
             type: boolean
             default: false
+            hidden: true
             label: Schedule Job?
             hidden: ${{ inputs.cluster.resource.schedulerType == '' }}
             ignore: ${{ .hidden }}
