@@ -1,71 +1,102 @@
-# Initialize cancel script
+set -o pipefail
+
+################################################################################
+# Interactive Session Service Starter - NGENCERF
+#
+# Purpose: Start the NGENCERF application stack (nginx proxy, SLURM wrapper
+#          Flask app, ngencerf-server and ngencerf-ui Docker containers)
+# Runs on: Controller or compute node
+#
+# Required Environment Variables (from inputs.sh):
+#   - service_port: Allocated port (injected by session_runner)
+#   - service_parent_install_dir: Installation directory
+#   - service_nginx_sif: Path to NGINX unprivileged Singularity container
+#   - nwm_cal_mgr_singularity_container_path: nwm-cal-mgr Singularity container
+#   - nwm_fcst_mgr_singularity_container_path: nwm-fcst-mgr Singularity container
+#   - nwm_verf_singularity_container_path: nwm-verf Singularity container
+#   - local_data_dir: Path to data directory on shared filesystem
+#   - container_data_dir: Path to data directory inside containers
+#   - service_ngencerf_server_dir: Path to ngencerf-server repository
+#   - service_ngencerf_ui_dir: Path to ngencerf-ui repository
+#   - service_build_server: Rebuild server image (true/false)
+#   - service_build_ui: Rebuild UI image (true/false)
+#   - service_slurm_app_workers: Gunicorn worker count
+#   - service_only_connect: Skip launch, connect to existing service (true/false)
+#   - service_name: Docker compose project name (ngencerf)
+################################################################################
+
 set -x
 
-echo whoami ": $(whoami)"
+echo "whoami: $(whoami)"
 
+if [ -z ${service_parent_install_dir} ]; then
+    service_parent_install_dir=${HOME}/pw/software
+fi
+
+# Port 5000 is used by the SLURM wrapper Flask app (internal, not user-facing).
+# Only one NGENCERF session can run per node.
 PORT=5000
 if lsof -i :$PORT >/dev/null 2>&1; then
-    echo
-    echo "Error: Port $PORT is already in use."
-    echo "Please ensure that no other NGENCERF job is currently running in the cluster."
-    echo "Exiting workflow run"
+    echo "::error title=Error::Port ${PORT} is already in use. Ensure no other NGENCERF session is running on this node."
     exit 1
 fi
 
-# Test if the user can execute a passwordless sudo command
+# Docker operations and file ownership changes require passwordless sudo.
 if sudo -n true 2>/dev/null; then
-  echo "You can execute passwordless sudo."
+    echo "Passwordless sudo available."
 else
-  echo
-  echo "ERROR: You do not have passwordless sudo access. Exiting."
-  exit 1
+    echo "::error title=Error::Passwordless sudo is required for NGENCERF. Exiting."
+    exit 1
 fi
 
-# Get the SLURM version
-slurm_version=$(scontrol version | awk '{print $2}' | cut -d'.' -f1)
-# Check the SLURM version
+# Determine SLURM job metrics format based on SLURM version.
+# The Flask app exports this so sacct output format matches the scheduler version.
+slurm_version=$(scontrol version 2>/dev/null | awk '{print $2}' | cut -d'.' -f1)
 if [[ "$slurm_version" == 22* ]]; then
     export SLURM_JOB_METRICS="JobID,Elapsed,NCPUS,CPUTime,MaxRSS,MaxDiskRead,MaxDiskWrite,Reserved"
-elif [[ "$slurm_version" == 23* ]]; then
-    export SLURM_JOB_METRICS="JobID,Elapsed,NCPUS,CPUTime,MaxRSS,MaxDiskRead,MaxDiskWrite,Planned"
 else
     export SLURM_JOB_METRICS="JobID,Elapsed,NCPUS,CPUTime,MaxRSS,MaxDiskRead,MaxDiskWrite,Planned"
 fi
 
-ngencerf_port=3000 #$(findAvailablePort)
+# ngencerf-ui Docker compose exposes the UI on port 3000 (hardcoded in compose files).
+ngencerf_port=3000
 
+# Initialize cancel script
 echo '#!/bin/bash' > cancel.sh
 echo "$(date) Running cancel script" >> cancel.sh
 chmod +x cancel.sh
 
 if [[ "${service_only_connect}" == "true" ]]; then
-    echo "Connecting to existing ngencerf service listening on port ${ngencerf_port}"
-    sleep infinity
+    echo "::notice::Connecting to existing NGENCERF service on port ${ngencerf_port}"
+    sleep inf
 fi
 
+# Validate required Singularity containers
 if ! [ -f "${service_nginx_sif}" ]; then
-   displayErrorMessage "NGINX proxy singularity container was not found ${service_nginx_sif}"
+    echo "::error title=Error::NGINX proxy Singularity container not found: ${service_nginx_sif}"
+    exit 1
 fi
-
 if ! [ -f "${nwm_cal_mgr_singularity_container_path}" ]; then
-   displayErrorMessage "nwm-cal-mgr singularity container was not found ${nwm_cal_mgr_singularity_container_path}"
+    echo "::error title=Error::nwm-cal-mgr Singularity container not found: ${nwm_cal_mgr_singularity_container_path}"
+    exit 1
 fi
-
 if ! [ -f "${nwm_fcst_mgr_singularity_container_path}" ]; then
-   displayErrorMessage "nwm-fcst-mgr singularity container was not found ${nwm_fcst_mgr_singularity_container_path}"
+    echo "::error title=Error::nwm-fcst-mgr Singularity container not found: ${nwm_fcst_mgr_singularity_container_path}"
+    exit 1
+fi
+if ! [ -f "${nwm_verf_singularity_container_path}" ]; then
+    echo "::error title=Error::nwm-verf Singularity container not found: ${nwm_verf_singularity_container_path}"
+    exit 1
 fi
 
-if ! [ -f "${nwm_verf_singularity_container_path}" ]; then
-   displayErrorMessage "nwm-verf singularity container was not found ${nwm_verf_singularity_container_path}"
-fi
 
 #################
 # NGINX WRAPPER #
 #################
+echo "::group::Nginx Proxy"
+echo "Starting nginx on service_port=${service_port}, proxying ngencerf-ui on port ${ngencerf_port}"
 
-echo "Starting nginx wrapper on service port ${service_port}"
-
-# Write config file
+# Nginx site config: routes / → ngencerf-ui, /api/ → ngencerf-server
 cat >> config.conf <<HERE
 map \$http_upgrade \$connection_upgrade { default upgrade; '' close; }
 
@@ -73,15 +104,13 @@ server {
   listen ${service_port};
   server_name _;
   index index.html index.htm index.php;
-  client_max_body_size 0; # Remove upload size limit by setting to 0
+  client_max_body_size 0;
 
-  # timeouts (shorter to notice app hangs)
   proxy_connect_timeout 10s;
   proxy_send_timeout    600s;
   proxy_read_timeout    600s;
   send_timeout          600s;
 
-  # CORS (minimal)
   add_header Access-Control-Allow-Origin  \$http_origin always;
   add_header Vary                         Origin always;
   add_header Access-Control-Allow-Methods "GET, POST, OPTIONS" always;
@@ -90,34 +119,26 @@ server {
   location / {
     proxy_pass http://127.0.0.1:${ngencerf_port}${basepath}/;
     proxy_http_version 1.1;
-
-    # only upgrade when client asked for it
     proxy_set_header   Upgrade    \$http_upgrade;
     proxy_set_header   Connection \$connection_upgrade;
-
     proxy_set_header   X-Real-IP         \$remote_addr;
     proxy_set_header   X-Forwarded-For   \$proxy_add_x_forwarded_for;
     proxy_set_header   X-Forwarded-Proto \$scheme;
     proxy_set_header   X-Forwarded-Host  \$host;
     proxy_set_header   Host              \$host;
-
-    # quick response to CORS preflight
     if (\$request_method = OPTIONS) { return 204; }
   }
 
   location /api/ {
     proxy_pass http://127.0.0.1:8000/;
     proxy_http_version 1.1;
-
     proxy_set_header   Upgrade    \$http_upgrade;
     proxy_set_header   Connection \$connection_upgrade;
-
     proxy_set_header   X-Real-IP         \$remote_addr;
     proxy_set_header   X-Forwarded-For   \$proxy_add_x_forwarded_for;
     proxy_set_header   X-Forwarded-Proto \$scheme;
     proxy_set_header   X-Forwarded-Host  \$host;
     proxy_set_header   Host              \$host;
-
     if (\$request_method = OPTIONS) { return 204; }
   }
 }
@@ -125,10 +146,8 @@ HERE
 
 cat >> nginx.conf <<HERE
 worker_processes  2;
-
 error_log  /var/log/nginx/error.log notice;
 pid        /tmp/nginx.pid;
-
 
 events {
     worker_connections  1024;
@@ -149,64 +168,76 @@ http {
                       '"\$http_user_agent" "\$http_x_forwarded_for"';
 
     access_log  /var/log/nginx/access.log  main;
-
     sendfile        on;
-    #tcp_nopush     on;
-
     keepalive_timeout  65;
-
-    #gzip  on;
-
     include /etc/nginx/conf.d/*.conf;
 }
 HERE
 
-echo "Running singularity container ${service_nginx_sif}"
-# We need to mount $PWD/tmp:/tmp because otherwise nginx writes the file /tmp/nginx.pid
-# and other users cannot use the node. Was not able to change this in the config.conf.
 mkdir -p ./tmp
-# Need to overwrite default configuration!
 touch empty
-singularity run -B $PWD/tmp:/tmp -B $PWD/config.conf:/etc/nginx/conf.d/config.conf -B $PWD/nginx.conf:/etc/nginx/nginx.conf  -B empty:/etc/nginx/conf.d/default.conf ${service_nginx_sif}  >> nginx.logs 2>&1 &
+singularity run \
+    -B $PWD/tmp:/tmp \
+    -B $PWD/config.conf:/etc/nginx/conf.d/config.conf \
+    -B $PWD/nginx.conf:/etc/nginx/nginx.conf \
+    -B empty:/etc/nginx/conf.d/default.conf \
+    ${service_nginx_sif} >> nginx.logs 2>&1 &
 echo "kill $!" >> cancel.sh
+echo "::endgroup::"
 
 
 ##################################
-# Launch SLURM Wrapper Flask App #
+# LAUNCH SLURM WRAPPER FLASK APP #
 ##################################
-# Transfer Python script
-if ! [ -f slurm-wrapper-app-v3.py ]; then
-   displayErrorMessage "SLURM wrapper slurm-wrapper-app-v3.py app not found "
+echo "::group::SLURM Wrapper App"
+
+SLURM_APP_VENV=${service_parent_install_dir}/ngencerf-venv
+GUNICORN_BIN=${SLURM_APP_VENV}/bin/gunicorn
+
+if ! [ -f "${GUNICORN_BIN}" ]; then
+    echo "::error title=Error::Gunicorn not found at ${GUNICORN_BIN}. The controller script must run first."
+    exit 1
 fi
 
-
-# Install Flask
-sudo -n pip3.8 install Flask
-sudo -n pip3.8 install gunicorn
-
-# Start Flask app using gunicorn
-export PARTITIONS=$(scontrol show partition | awk -F '=' '/^PartitionName=/ {printf "%s,", $2}' | sed 's/,$//')
-
-# This script is required to run the callback with retries
+# Copy scripts to the job rundir and substitute the local_data_dir placeholder.
+# The Flask app uses ./run_callback.sh relative to its working directory.
+NGENCERF_DIR=${PW_PARENT_JOB_DIR}/ngencerf
+cp ${NGENCERF_DIR}/slurm-wrapper-app-v3.py .
+cp ${NGENCERF_DIR}/run_callback.sh .
 sed -i "s|__LOCAL_DATA_DIR__|${local_data_dir}|g" run_callback.sh
 chmod +x run_callback.sh
+cp ${NGENCERF_DIR}/run_pending_callbacks.sh .
+sed -i "s|__LOCAL_DATA_DIR__|${local_data_dir}|g" run_pending_callbacks.sh
+chmod +x run_pending_callbacks.sh
 
-/usr/local/bin/gunicorn -w ${service_slurm_app_workers} -b 0.0.0.0:5000 slurm-wrapper-app-v3:app \
-  --access-logfile slurm-wrapper-app-v3.log \
-  --error-logfile slurm-wrapper-app-v3.log \
-  --capture-output \
-  --enable-stdio-inheritance > slurm-wrapper-app-v3.log 2>&1 &
+# PARTITIONS is read by the Flask app at startup to validate partition inputs.
+export PARTITIONS=$(scontrol show partition | awk -F '=' '/^PartitionName=/ {printf "%s,", $2}' | sed 's/,$//')
 
+${GUNICORN_BIN} \
+    -w ${service_slurm_app_workers} \
+    -b 0.0.0.0:5000 \
+    slurm-wrapper-app-v3:app \
+    --access-logfile slurm-wrapper-app-v3.log \
+    --error-logfile slurm-wrapper-app-v3.log \
+    --capture-output \
+    --enable-stdio-inheritance > slurm-wrapper-app-v3.log 2>&1 &
 slurm_wrapper_pid=$!
 echo "kill ${slurm_wrapper_pid}" >> cancel.sh
 
-# Rerun previous callbacks
-sed -i "s|__LOCAL_DATA_DIR__|${local_data_dir}|g" run_pending_callbacks.sh
+# Re-run callbacks that were pending when the previous session ended
 bash run_pending_callbacks.sh >> run_pending_callback.log 2>&1 &
 run_pending_callbacks_pid=$!
-echo "kill ${run_pending_callbacks_pid} #rerun callbacks" >> cancel.sh
+echo "kill ${run_pending_callbacks_pid}" >> cancel.sh
 
-# Run ngencerf-app
+echo "::endgroup::"
+
+
+##########################
+# LAUNCH NGENCERF APP    #
+##########################
+echo "::group::NGENCERF App"
+
+# Add compose teardown to cancel script before launching containers
 echo "cd ${service_ngencerf_server_dir}" >> cancel.sh
 echo "docker compose \
   --project-name ${service_name} \
@@ -215,119 +246,111 @@ echo "docker compose \
   --file ${service_ngencerf_server_dir}/production-pw.yaml \
   down --remove-orphans" >> cancel.sh
 
-# ensure buildx uses the docker driver (not the docker-container helper)
-# TODO: add this to PW start script
+# Ensure docker buildx uses the plain docker driver, not docker-container.
+# The docker-container driver requires a running daemon-in-daemon which is not
+# available in all cluster environments.
 if docker buildx ls | grep -qE 'localdocker.+docker.+\*'; then
-  : # already selected
+    : # already selected
 elif docker buildx ls | grep -q 'localdocker'; then
-  docker buildx use localdocker
+    docker buildx use localdocker
 else
-  docker buildx create --name localdocker --driver docker --use
+    docker buildx create --name localdocker --driver docker --use
 fi
 
-# export variables needed for ngencerf-ui compose file
-export pw_platform_host="${pw_platform_host}"
+# ngencerf-ui compose files read these variables from the environment
+export pw_platform_host="${PW_PLATFORM_HOST}"
 export basepath="${basepath}"
 export ngencerf_port="${ngencerf_port}"
 export HOSTNAME=$(hostname)
 
-# get ngencerf-server tag to be used within compose files
-export NGENCERF_SERVER_TAG=$( \
-  cd ${service_ngencerf_server_dir} && \
-  TAG=$(git describe --tags --exact-match 2>/dev/null); \
-  BRANCH=$(git rev-parse --abbrev-ref HEAD); \
-  if [ -n "$TAG" ]; then \
-    echo "$TAG"; \
-  elif [ "$BRANCH" == "development" ]; then \
-    echo "latest"; \
-  elif [ "$BRANCH" != "HEAD" ]; then \
-    echo "$BRANCH"; \
-  else \
-    git rev-parse --short HEAD; \
-  fi \
-) && \
-echo "Using Tag: $NGENCERF_SERVER_TAG"
+# Determine image tags from git metadata in each repo directory
+export NGENCERF_SERVER_TAG=$(
+    cd ${service_ngencerf_server_dir} &&
+    TAG=$(git describe --tags --exact-match 2>/dev/null)
+    BRANCH=$(git rev-parse --abbrev-ref HEAD)
+    if [ -n "$TAG" ]; then
+        echo "$TAG"
+    elif [ "$BRANCH" == "development" ]; then
+        echo "latest"
+    elif [ "$BRANCH" != "HEAD" ]; then
+        echo "$BRANCH"
+    else
+        git rev-parse --short HEAD
+    fi
+)
+echo "Using NGENCERF_SERVER_TAG: $NGENCERF_SERVER_TAG"
 
-# get ngencerf-ui tag to be used within compose files
-export NGENCERF_UI_TAG=$( \
-  cd "${service_ngencerf_ui_dir}" && \
-  TAG=$(git describe --tags --exact-match 2>/dev/null); \
-  BRANCH=$(git rev-parse --abbrev-ref HEAD); \
-  if [ -n "$TAG" ]; then \
-    echo "$TAG"; \
-  elif [ "$BRANCH" == "development" ]; then \
-    echo "latest"; \
-  elif [ "$BRANCH" != "HEAD" ]; then \
-    echo "$BRANCH"; \
-  else \
-    git rev-parse --short HEAD; \
-  fi \
-) && \
-echo "Using Tag: $NGENCERF_UI_TAG"
+export NGENCERF_UI_TAG=$(
+    cd "${service_ngencerf_ui_dir}" &&
+    TAG=$(git describe --tags --exact-match 2>/dev/null)
+    BRANCH=$(git rev-parse --abbrev-ref HEAD)
+    if [ -n "$TAG" ]; then
+        echo "$TAG"
+    elif [ "$BRANCH" == "development" ]; then
+        echo "latest"
+    elif [ "$BRANCH" != "HEAD" ]; then
+        echo "$BRANCH"
+    else
+        git rev-parse --short HEAD
+    fi
+)
+echo "Using NGENCERF_UI_TAG: $NGENCERF_UI_TAG"
 
-# Silence the expected orphan warning for multi-file projects
+# Suppress the expected orphan warning when using multi-file compose projects
 export COMPOSE_IGNORE_ORPHANS=True
 
 if [[ "${service_build_server}" == "true" ]]; then
-  # build locally and start ngencerf-server
-  CACHE_BUST=$(date +%s) docker compose \
-    --project-name ${service_name} \
-    --project-directory ${service_ngencerf_server_dir} \
-    --env-file ${service_ngencerf_server_dir}/cerfServer/.env-override \
-    --file ${service_ngencerf_server_dir}/production-pw.yaml \
-    up --detach --build ngencerf-services
-
+    CACHE_BUST=$(date +%s) docker compose \
+        --project-name ${service_name} \
+        --project-directory ${service_ngencerf_server_dir} \
+        --env-file ${service_ngencerf_server_dir}/cerfServer/.env-override \
+        --file ${service_ngencerf_server_dir}/production-pw.yaml \
+        up --detach --build ngencerf-services
 else
-  # start ngencerf-server
-  CACHE_BUST=$(date +%s) docker compose \
-    --project-name ${service_name} \
-    --project-directory ${service_ngencerf_server_dir} \
-    --env-file ${service_ngencerf_server_dir}/cerfServer/.env-override \
-    --file ${service_ngencerf_server_dir}/production-pw.yaml \
-    up --detach --no-build --pull never ngencerf-services
+    CACHE_BUST=$(date +%s) docker compose \
+        --project-name ${service_name} \
+        --project-directory ${service_ngencerf_server_dir} \
+        --env-file ${service_ngencerf_server_dir}/cerfServer/.env-override \
+        --file ${service_ngencerf_server_dir}/production-pw.yaml \
+        up --detach --no-build --pull never ngencerf-services
 fi
 
 if [[ "${service_build_ui}" == "true" ]]; then
-  # build locally and start ngencerf-ui
-  docker compose \
-    --project-name ${service_name} \
-    --project-directory ${service_ngencerf_ui_dir} \
-    --file ${service_ngencerf_ui_dir}/compose.yaml \
-    up --detach --build --no-deps ngencerf-app
+    docker compose \
+        --project-name ${service_name} \
+        --project-directory ${service_ngencerf_ui_dir} \
+        --file ${service_ngencerf_ui_dir}/compose.yaml \
+        up --detach --build --no-deps ngencerf-app
 else
-  # start ngencerf-ui
-  docker compose \
-    --project-name ${service_name} \
-    --project-directory ${service_ngencerf_ui_dir} \
-    --file ${service_ngencerf_ui_dir}/compose.yaml \
-    up --detach --no-build --pull never --no-deps ngencerf-app
+    docker compose \
+        --project-name ${service_name} \
+        --project-directory ${service_ngencerf_ui_dir} \
+        --file ${service_ngencerf_ui_dir}/compose.yaml \
+        up --detach --no-build --pull never --no-deps ngencerf-app
 fi
 
-# get image name for CLI extract
+# Extract the ngencerf CLI binary from the server image for use on the host
 ngencerf_image="$(docker compose \
-  --project-name ${service_name} \
-  --project-directory ${service_ngencerf_server_dir} \
-  --env-file ${service_ngencerf_server_dir}/cerfServer/.env-override \
-  --file ${service_ngencerf_server_dir}/production-pw.yaml \
-  config | awk '/ngencerf-services/{flag=1} flag && /image:/{print $2; exit}')"
+    --project-name ${service_name} \
+    --project-directory ${service_ngencerf_server_dir} \
+    --env-file ${service_ngencerf_server_dir}/cerfServer/.env-override \
+    --file ${service_ngencerf_server_dir}/production-pw.yaml \
+    config | awk '/ngencerf-services/{flag=1} flag && /image:/{print $2; exit}')"
 echo "ngencerf_image=${ngencerf_image}"
 
-# clean any previous temp container quietly
 docker rm -f extract >/dev/null 2>&1 || true
-
-# only attempt extract if the image exists locally
 if docker image inspect "${ngencerf_image}" >/dev/null 2>&1; then
-  docker create --name extract "${ngencerf_image}" >/dev/null
-  sudo docker cp extract:/ngencerf/ngencerf-server/cli/dist/ngencerf /usr/local/bin/ngencerf
-  docker rm extract >/dev/null
-  sudo chmod +x /usr/local/bin/ngencerf
+    docker create --name extract "${ngencerf_image}" >/dev/null
+    sudo docker cp extract:/ngencerf/ngencerf-server/cli/dist/ngencerf /usr/local/bin/ngencerf
+    docker rm extract >/dev/null
+    sudo chmod +x /usr/local/bin/ngencerf
 else
-  echo "warning: image ${ngencerf_image} not found locally; skipping CLI extract"
+    echo "::notice::Image ${ngencerf_image} not found locally; skipping CLI extract"
 fi
 
-# Tail the logs
-docker compose \
-  --project-name ${service_name} \
-  logs --follow
+# Stream logs to stdout (session_runner watches for service readiness via port poll)
+docker compose --project-name ${service_name} logs --follow
 
-sleep infinity
+echo "::endgroup::"
+
+sleep inf

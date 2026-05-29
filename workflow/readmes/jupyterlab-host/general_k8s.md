@@ -1,5 +1,5 @@
 # JupyterLab Interactive Session
-This workflow starts a JupyterLab server [interactive session](https://github.com/parallelworks/interactive_session/blob/main/README-v3.md), on either a **Compute Cluster** (SLURM or PBS) or a **Kubernetes Cluster**.
+This workflow starts a JupyterLab server [interactive session](../../../README.md), on either a **Compute Cluster** (SLURM or PBS) or a **Kubernetes Cluster**.
 
 Use the `Target Type` input to select your environment.
 
@@ -14,8 +14,10 @@ Refer to the included Jupyter notebook at `jupyterlab-host/dask-extension-jupyte
 2. Data transfer to and from a PW storage resource, corresponding to an AWS S3 bucket. Authentication is streamlined through short-term credentials.
 3. Integration of the [Dask extension for JupyterLab](https://github.com/dask/dask-labextension)
 
-A sample YAML file outlining Dask dependencies for PW is provided at `jupyterlab-host/dask-extension-jupyterlab.yaml`. These dependencies are automatically installed by selecting the input form parameters displayed in this [screenshot](https://raw.githubusercontent.com/parallelworks/interactive_session/jupyterlab-yaml-file/workflow/readmes/jupyterlab-host/dask-input-form.png). Alternatively, you have the option to use your own YAML file.
- 
+A sample YAML file outlining Dask dependencies for PW is provided at `jupyterlab-host/dask-extension-jupyterlab.yaml`. These dependencies are automatically installed by selecting the input form parameters displayed in the screenshot below. Alternatively, you have the option to use your own YAML file.
+
+![Parallel Works ACTIVATE input form](dask-input-form.png)
+
 
 
 ## Kubernetes Cluster
@@ -39,7 +41,7 @@ Examples:
 #### Test GPU Access in JupyterLab
 
 ##### PyTorch
-```
+```python
 import torch
 if torch.cuda.is_available():
     num_gpus = torch.cuda.device_count()
@@ -51,7 +53,7 @@ else:
 ```
 
 ##### TensorFlow
-```
+```python
 import tensorflow as tf
 physical_devices = tf.config.list_physical_devices('GPU')
 if physical_devices:
@@ -64,7 +66,7 @@ else:
 
 ##### Nvidia MIG Instances
 To use more than one Multi-Instance GPUs (MIG) set the `CUDA_VISIBLE_DEVICES` environment variable.
-```
+```python
 !nvidia-smi -L | grep MIG | grep -o 'MIG-[a-f0-9-]\+'
 import os
 # Replace with the MIG instance IDs

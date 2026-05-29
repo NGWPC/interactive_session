@@ -1,5 +1,19 @@
-# Runs via ssh + sbatch
-set -x
+################################################################################
+# Interactive Session Service Starter - JupyterLab Host
+#
+# Purpose: Start JupyterLab service on allocated port with nginx proxy
+# Runs on: Controller or compute node
+# Called by: Workflow after controller setup
+#
+# Required Environment Variables:
+#   - service_port: Allocated port (from session_runner)
+#   - service_parent_install_dir: Installation directory
+#   - service_conda_sh: Path to conda.sh for environment activation
+#   - service_conda_env: Conda environment name
+#   - service_notebook_dir: JupyterLab root directory (default: /)
+#   - service_password: Access password (optional)
+#   - juice_use_juice: Enable Juice for remote GPU access (optional)
+################################################################################
 
 start_rootless_docker() {
     local MAX_RETRIES=20
@@ -11,18 +25,20 @@ start_rootless_docker() {
     PATH=/usr/bin:/sbin:/usr/sbin:$PATH dockerd-rootless.sh --exec-opt native.cgroupdriver=cgroupfs > docker-rootless.log 2>&1 & #--data-root /docker-rootless/docker-rootless/
 
     # Wait for Docker daemon to be ready
+    echo "::group::Waiting for Docker daemon to start"
     until docker info > /dev/null 2>&1; do
         if [ $ATTEMPT -le $MAX_RETRIES ]; then
-            echo "$(date) Attempt $ATTEMPT of $MAX_RETRIES: Waiting for Docker daemon to start..."
+            echo "Attempt $ATTEMPT of $MAX_RETRIES: waiting for Docker daemon..."
             sleep $RETRY_INTERVAL
             ((ATTEMPT++))
         else
-            echo "$(date) ERROR: Docker daemon failed to start after $MAX_RETRIES attempts."
+            echo "::endgroup::"
+            echo "::error title=Error::Docker daemon failed to start after $MAX_RETRIES attempts."
             return 1
         fi
     done
-
-    echo  "$(date): Docker daemon is ready!"
+    echo "::endgroup::"
+    echo "::notice::Docker daemon is ready!"
     return 0
 }
 
@@ -35,8 +51,10 @@ if [ -z "${service_nginx_sif}" ]; then
     service_nginx_sif=${service_parent_install_dir}/nginx-unprivileged.sif
 fi
 
-if [ -z "${service_load_env}" ]; then
-    service_conda_sh=${service_parent_install_dir}/${service_conda_install_dir}/etc/profile.d/conda.sh
+# Always compute the correct conda paths based on install directories
+service_conda_sh=${service_parent_install_dir}/${service_conda_install_dir}/etc/profile.d/conda.sh
+# Always set service_load_env to use the correct path (override any pre-set value)
+if [[ "${service_conda_install}" == "true" ]] && [ -z "${service_load_env}" ]; then
     service_load_env="source ${service_conda_sh}; conda activate ${service_conda_env}"
 fi
 
@@ -45,7 +63,7 @@ eval "${service_load_env}"
 # Initialize cancel script
 echo '#!/bin/bash' > cancel.sh
 chmod +x cancel.sh
-jupyterlab_port=$(findAvailablePort)
+jupyterlab_port=$(pw agent open-port)
 
 if [[ "${service_conda_install}" == "true" ]]; then
     source ${service_conda_sh}
@@ -55,17 +73,16 @@ else
 fi
 
 if [ -z $(which jupyter-lab 2> /dev/null) ]; then
-    displayErrorMessage "jupyter-lab command not found"
+    echo "::error title=Error::jupyter-lab command not found"
+    exit 1
 fi
-
-export XDG_RUNTIME_DIR=""
 
 # Generate sha:
 if [ -z "${service_password}" ]; then
-    echo "No password was specified"
+    echo "::notice::No password was specified"
     sha=""
 else
-    echo "Generating sha"
+    echo "::notice::Generating password hash"
     sha=$(python3 -c "from notebook.auth.security import passwd; print(passwd('${service_password}', algorithm = 'sha1'))")
 fi
 # Set the launch directory for JupyterHub
@@ -78,28 +95,35 @@ fi
 #######################
 # START NGINX WRAPPER #
 #######################
+if ! which singularity > /dev/null 2>&1; then
+    module load singularity 2>/dev/null
+    if ! which singularity > /dev/null 2>&1; then
+        module load apptainer 2>/dev/null
+    fi
+fi
 
 proxy_port=${jupyterlab_port}
 proxy_host="127.0.0.1"
 if which docker >/dev/null 2>&1 && [[ "${service_rootless_docker}" == "true" ]]; then
     if ! dockerd-rootless-setuptool.sh check; then
-        echo "$(date) ERROR: Rootless docker is NOT support on this system"
+        echo "::error title=Error::Rootless docker is not supported on this system"
         exit 1
     fi
     if ! which socat >/dev/null 2>&1; then
-        echo "$(date) ERROR: socat is not installed"
+        echo "::error title=Error::socat is not installed"
         exit 1
     fi
     start_rootless_docker
     # Need to run this for the container to be able to access the port on the host's network
-    proxy_port=$(findAvailablePort)
+    proxy_port=$(pw agent open-port)
     proxy_host=$(hostname -I | xargs)
     socat TCP-LISTEN:${proxy_port},fork,reuseaddr TCP:127.0.0.1:${jupyterlab_port} >> socat.logs 2>&1 &
     pid=$!
     echo "kill ${pid} #socat" >> cancel.sh
 fi
 
-echo "Starting nginx wrapper on service port ${service_port}"
+echo "::group::Nginx Proxy"
+echo "::notice::Starting nginx wrapper on service port ${service_port}"
 
 # Write config file
 cat >> config.conf <<HERE
@@ -203,7 +227,7 @@ elif sudo -n true 2>/dev/null && which docker >/dev/null 2>&1; then
     # Print logs
     sudo docker logs ${container_name}
 elif which singularity >/dev/null 2>&1; then
-    echo "Running singularity container ${service_nginx_sif}"
+    echo "::notice::Running singularity container ${service_nginx_sif}"
     # We need to mount $PWD/tmp:/tmp because otherwise nginx writes the file /tmp/nginx.pid 
     # and other users cannot use the node. Was not able to change this in the config.conf.
     mkdir -p ./tmp
@@ -213,13 +237,17 @@ elif which singularity >/dev/null 2>&1; then
     pid=$!
     echo "kill ${pid}" >> cancel.sh
 else
-    displayErrorMessage "Need Docker or Singularity to start NGINX proxy"
+    echo "::error title=Error::Need Docker or Singularity to start NGINX proxy"
+    exit 1
 fi
+echo "::endgroup::"
 
 
 ####################
 # START JUPYTERLAB #
 ####################
+echo "::group::JupyterLab"
+export XDG_RUNTIME_DIR=""
 
 if [ -z ${service_notebook_dir} ]; then
     service_notebook_dir="/"
@@ -246,13 +274,15 @@ sed -i "s|^.*c\.ServerApp\.root_dir.*|c.ServerApp.root_dir = '${service_notebook
 cd ${service_notebook_dir}
 
 # JUICE https://docs.juicelabs.co/docs/juice/intro
+juice_cmd=""  # Initialize to empty
 if [[ "${juice_use_juice}" == "true" ]]; then
-    echo "INFO: Enabling Juice for remote GPU access"
+    echo "::group::Juice Setup"
+    echo "::notice title=Info::Enabling Juice for remote GPU access"
     if [ -z "${juice_exec}" ]; then
         juice_exec=${service_parent_install_dir}/juice/juice
-        echo "INFO: Set Juice executable path to ${juice_exec}"
+        echo "::notice title=Info::Set Juice executable path to ${juice_exec}"
     fi
-    
+
     if ! [ -z "${juice_vram}" ]; then
         vram_arg="--vram ${juice_vram}"
     fi
@@ -260,17 +290,23 @@ if [[ "${juice_use_juice}" == "true" ]]; then
         pool_ids_arg="--pool-ids ${juice_pool_ids}"
     fi
     juice_cmd="${juice_exec} run ${juice_cmd_args} ${vram_arg} ${pool_ids_arg}"
-    echo "INFO: Prepared Juice command: ${juice_cmd}"
-    echo "INFO: Logging into Juice with provided token"
+    echo "::notice title=Info::Prepared Juice command: ${juice_cmd}"
+    echo "::notice title=Info::Logging into Juice with provided token"
     ${juice_exec} login -t "${JUICE_TOKEN}" || {
-        echo "ERROR: Failed to log into Juice"
+        echo "::error title=Error::Failed to log into Juice"
         exit 1
     }
+    echo "::endgroup::"
 fi
 
 date
 
-${juice_cmd} jupyter-lab --port=${jupyterlab_port} --no-browser --config=${resource_jobdir}/jupyter_lab_config.py --allow-root
+mkdir -p ${PW_PARENT_JOB_DIR}/jupyter_runtime
+export JUPYTER_RUNTIME_DIR=${PW_PARENT_JOB_DIR}/jupyter_runtime
+echo "::endgroup::"
+${juice_cmd} jupyter-lab --port=${jupyterlab_port} --no-browser --config=${PW_PARENT_JOB_DIR}/jupyter_lab_config.py --allow-root
 #jupyter-lab --port=${jupyterlab_port} --ip ${HOSTNAME} --no-browser --config=${PWD}/jupyter_lab_config.py
 
+# Keep container alive indefinitely
+# Using 'inf' which is bash-specific shorthand for infinity
 sleep inf
