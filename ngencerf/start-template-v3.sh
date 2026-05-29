@@ -63,7 +63,7 @@ ngencerf_port=3000
 
 # Initialize cancel script
 echo '#!/bin/bash' > cancel.sh
-echo "$(date) Running cancel script" >> cancel.sh
+echo "echo '$(date) Running cancel script'" >> cancel.sh
 chmod +x cancel.sh
 
 if [[ "${service_only_connect}" == "true" ]]; then
@@ -299,6 +299,10 @@ echo "Using NGENCERF_UI_TAG: $NGENCERF_UI_TAG"
 # Suppress the expected orphan warning when using multi-file compose projects
 export COMPOSE_IGNORE_ORPHANS=True
 
+# production-pw.yaml requires these for volume mounts that are not in .env-override
+export NGEN_CAL_DATA_PATH=${local_data_dir}
+export CONTAINER_PATH=$(dirname "${nwm_cal_mgr_singularity_container_path}")
+
 if [[ "${service_build_server}" == "true" ]]; then
     CACHE_BUST=$(date +%s) docker compose \
         --project-name ${service_name} \
@@ -315,17 +319,29 @@ else
         up --detach --no-build --pull never ngencerf-services
 fi
 
+# Generate a compose override to inject the dynamic basepath into the Nuxt server.
+# NUXT_APP_BASE_URL tells Nitro (SSR runtime) to serve at the basepath, so
+# asset URLs in rendered HTML are prefixed correctly for the platform proxy.
+cat > ${PW_PARENT_JOB_DIR}/ui-compose-override.yml <<EOF
+services:
+  ngencerf-app:
+    environment:
+      - NUXT_APP_BASE_URL=${basepath}/
+EOF
+
 if [[ "${service_build_ui}" == "true" ]]; then
     docker compose \
         --project-name ${service_name} \
         --project-directory ${service_ngencerf_ui_dir} \
         --file ${service_ngencerf_ui_dir}/compose.yaml \
+        --file ${PW_PARENT_JOB_DIR}/ui-compose-override.yml \
         up --detach --build --no-deps ngencerf-app
 else
     docker compose \
         --project-name ${service_name} \
         --project-directory ${service_ngencerf_ui_dir} \
         --file ${service_ngencerf_ui_dir}/compose.yaml \
+        --file ${PW_PARENT_JOB_DIR}/ui-compose-override.yml \
         up --detach --no-build --pull never --no-deps ngencerf-app
 fi
 
