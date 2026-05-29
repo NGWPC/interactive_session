@@ -97,7 +97,6 @@ jobs:
             default: false
             hidden: true
             label: Schedule Job?
-            ignore: ${{ .hidden }}
             tooltip: |
               Yes → Job is submitted to the SLURM scheduler via sbatch
               No  → Job runs directly on the controller/login node
