@@ -242,6 +242,7 @@ echo "cd ${service_ngencerf_server_dir}" >> cancel.sh
 echo "docker compose \
   --project-name ${service_name} \
   --project-directory ${service_ngencerf_server_dir} \
+  --env-file ${service_ngencerf_server_dir}/docker.env \
   --env-file ${service_ngencerf_server_dir}/cerfServer/.env-override \
   --file ${service_ngencerf_server_dir}/production-pw.yaml \
   down --remove-orphans" >> cancel.sh
@@ -299,56 +300,146 @@ echo "Using NGENCERF_UI_TAG: $NGENCERF_UI_TAG"
 # Suppress the expected orphan warning when using multi-file compose projects
 export COMPOSE_IGNORE_ORPHANS=True
 
-# production-pw.yaml requires these for volume mounts that are not in .env-override
+# Export these as fallback for the migration check docker run; docker.env
+# provides the canonical values for docker compose commands.
 export NGEN_CAL_DATA_PATH=${local_data_dir}
 export CONTAINER_PATH=$(dirname "${nwm_cal_mgr_singularity_container_path}")
+
+# Resolve the server image name so we can run a pre-start migration check.
+_server_image=$(docker compose \
+    --project-name ${service_name} \
+    --project-directory ${service_ngencerf_server_dir} \
+    --env-file ${service_ngencerf_server_dir}/docker.env \
+    --env-file ${service_ngencerf_server_dir}/cerfServer/.env-override \
+    --file ${service_ngencerf_server_dir}/production-pw.yaml \
+    config | awk '/ngencerf-services/{flag=1} flag && /image:/{print $2; exit}')
 
 if [[ "${service_build_server}" == "true" ]]; then
     CACHE_BUST=$(date +%s) docker compose \
         --project-name ${service_name} \
         --project-directory ${service_ngencerf_server_dir} \
+        --env-file ${service_ngencerf_server_dir}/docker.env \
         --env-file ${service_ngencerf_server_dir}/cerfServer/.env-override \
         --file ${service_ngencerf_server_dir}/production-pw.yaml \
-        up --detach --build ngencerf-services
-else
-    CACHE_BUST=$(date +%s) docker compose \
+        build ngencerf-services
+fi
+
+# Fix any migration dependency inconsistencies before starting the server.
+# Handles Django InconsistentMigrationHistory where a new prerequisite migration
+# was inserted after higher-numbered migrations were already applied to the DB.
+if [ -n "${_server_image}" ] && docker image inspect "${_server_image}" >/dev/null 2>&1; then
+    echo "::notice::Checking migration consistency..."
+    docker run --rm \
+        --env-file ${service_ngencerf_server_dir}/docker.env \
+        --env-file ${service_ngencerf_server_dir}/cerfServer/.env-override \
+        -e NGENCERF_BASE_URL=$(hostname) \
+        -e NGENCERF_UI_TAG=${NGENCERF_UI_TAG:-latest} \
+        -e HOSTNAME=$(hostname) \
+        "${_server_image}" \
+        python3 -c '
+import subprocess, re, sys, os
+os.chdir("/ngencerf/ngencerf-server")
+r = subprocess.run(["python", "manage.py", "showmigrations"],
+                   capture_output=True, text=True)
+app, applied, not_applied = None, {}, {}
+for line in r.stdout.splitlines():
+    if line and not line.startswith(" "):
+        app = line.strip()
+        applied[app] = []
+        not_applied[app] = []
+    elif app:
+        if "[X]" in line:
+            m = re.search(r"\[X\]\s+(\d{4})", line)
+            if m: applied[app].append(int(m.group(1)))
+        elif "[ ]" in line:
+            m = re.search(r"\[ \]\s+(\d{4})", line)
+            if m: not_applied[app].append(int(m.group(1)))
+for a in list(applied):
+    if not applied.get(a) or not not_applied.get(a):
+        continue
+    max_a = max(applied[a])
+    for n in [x for x in not_applied[a] if x < max_a]:
+        print(f"Faking prerequisite: {a} {n:04d}", flush=True)
+        subprocess.run(["python", "manage.py", "migrate", "--fake", a, str(n).zfill(4)],
+                       cwd="/ngencerf/ngencerf-server", check=False)
+' 2>&1 | head -20 || echo "::notice::Migration check completed."
+fi
+
+if [[ "${service_build_server}" == "true" ]]; then
+    docker compose \
         --project-name ${service_name} \
         --project-directory ${service_ngencerf_server_dir} \
+        --env-file ${service_ngencerf_server_dir}/docker.env \
+        --env-file ${service_ngencerf_server_dir}/cerfServer/.env-override \
+        --file ${service_ngencerf_server_dir}/production-pw.yaml \
+        up --detach --no-build ngencerf-services
+else
+    docker compose \
+        --project-name ${service_name} \
+        --project-directory ${service_ngencerf_server_dir} \
+        --env-file ${service_ngencerf_server_dir}/docker.env \
         --env-file ${service_ngencerf_server_dir}/cerfServer/.env-override \
         --file ${service_ngencerf_server_dir}/production-pw.yaml \
         up --detach --no-build --pull never ngencerf-services
 fi
 
-# Generate a compose override to inject the dynamic basepath into the Nuxt server.
-# NUXT_APP_BASE_URL tells Nitro (SSR runtime) to serve at the basepath, so
-# asset URLs in rendered HTML are prefixed correctly for the platform proxy.
-cat > ${PW_PARENT_JOB_DIR}/ui-compose-override.yml <<EOF
-services:
-  ngencerf-app:
-    environment:
-      - NUXT_APP_BASE_URL=${basepath}/
-EOF
-
+# Build the base ngencerf-ui image from source if requested, using
+# production-pw.yaml which provides the correct NGENCERF_BASE_URL build arg.
+# This step may fail if the upstream base OS image can't be pulled; in that
+# case the cached image is used for the basepath build below.
 if [[ "${service_build_ui}" == "true" ]]; then
     docker compose \
         --project-name ${service_name} \
         --project-directory ${service_ngencerf_ui_dir} \
-        --file ${service_ngencerf_ui_dir}/compose.yaml \
-        --file ${PW_PARENT_JOB_DIR}/ui-compose-override.yml \
-        up --detach --build --no-deps ngencerf-app
-else
-    docker compose \
-        --project-name ${service_name} \
-        --project-directory ${service_ngencerf_ui_dir} \
-        --file ${service_ngencerf_ui_dir}/compose.yaml \
-        --file ${PW_PARENT_JOB_DIR}/ui-compose-override.yml \
-        up --detach --no-build --pull never --no-deps ngencerf-app
+        --file ${service_ngencerf_ui_dir}/production-pw.yaml \
+        build ngencerf-app 2>&1 | tail -3 \
+    || echo "::notice::Base UI image build failed; using cached image."
 fi
+
+# Generate a wrapper Dockerfile that re-runs npm build with NUXT_APP_BASE_URL
+# baked in via .nuxtrc. NUXT_APP_BASE_URL MUST be set at BUILD time so Vite
+# embeds correct asset paths and Vue Router gets the correct base URL.
+# Builds on top of the existing ghcr.io/ngwpc/ngencerf-ui image (fresh or
+# cached), avoiding a full rebuild from the OS base image each time.
+cat > ${PW_PARENT_JOB_DIR}/Dockerfile.ngencerf-ui <<'DOCKERFILE'
+ARG NGENCERF_UI_TAG=latest
+FROM ghcr.io/ngwpc/ngencerf-ui:${NGENCERF_UI_TAG}
+
+ARG NUXT_APP_BASE_URL=/
+WORKDIR /var/www/ngencerf/nuxt-app
+RUN echo "app.baseURL=${NUXT_APP_BASE_URL}" > .nuxtrc && npm run build
+
+ENV NUXT_HOST=0.0.0.0
+ENV NUXT_PORT=3000
+DOCKERFILE
+
+cat > ${PW_PARENT_JOB_DIR}/ui-compose-override.yml <<EOF
+services:
+  ngencerf-app:
+    build:
+      context: ${PW_PARENT_JOB_DIR}
+      dockerfile: ${PW_PARENT_JOB_DIR}/Dockerfile.ngencerf-ui
+      args:
+        - NGENCERF_UI_TAG=${NGENCERF_UI_TAG:-latest}
+        - NUXT_APP_BASE_URL=${basepath}/
+    environment:
+      - NUXT_HOST=0.0.0.0
+      - NUXT_PORT=3000
+      - NUXT_APP_BASE_URL=${basepath}/
+EOF
+
+docker compose \
+    --project-name ${service_name} \
+    --project-directory ${service_ngencerf_ui_dir} \
+    --file ${service_ngencerf_ui_dir}/production-pw.yaml \
+    --file ${PW_PARENT_JOB_DIR}/ui-compose-override.yml \
+    up --detach --build --no-deps ngencerf-app
 
 # Extract the ngencerf CLI binary from the server image for use on the host
 ngencerf_image="$(docker compose \
     --project-name ${service_name} \
     --project-directory ${service_ngencerf_server_dir} \
+    --env-file ${service_ngencerf_server_dir}/docker.env \
     --env-file ${service_ngencerf_server_dir}/cerfServer/.env-override \
     --file ${service_ngencerf_server_dir}/production-pw.yaml \
     config | awk '/ngencerf-services/{flag=1} flag && /image:/{print $2; exit}')"
