@@ -5,6 +5,8 @@ sessions:
   session:
     useTLS: false
     redirect: true
+    prompt-for-name:
+      default: 'ngencerf'
 
 jobs:
   preprocessing:
@@ -41,6 +43,7 @@ jobs:
           nwm_verf_singularity_container_path="${{ inputs.service.nwm_verf_sif }}"
           service_ngencerf_server_dir="${{ inputs.service.ngencerf_server_dir }}"
           service_ngencerf_ui_dir="${{ inputs.service.ngencerf_ui_dir }}"
+          service_ngencerf_docker_dir="${{ inputs.service.ngencerf_docker_dir }}"
           service_build_server="${{ inputs.service.build_server }}"
           service_build_ui="${{ inputs.service.build_ui }}"
           pw_platform_host="${PW_PLATFORM_HOST}"
@@ -162,64 +165,87 @@ jobs:
           nginx_sif:
             label: NGINX Singularity Container Path
             type: string
+            default: /ngencerf-app/singularity/nginx-unprivileged.sif
+            hidden: true
             tooltip: Absolute path to the nginx-unprivileged Singularity (.sif) container on the cluster.
 
           nwm_cal_mgr_sif:
             label: NWM Calibration Manager Container Path
             type: string
+            default: /ngencerf-app/singularity/nwm-cal-mgr.sif
+            hidden: true
             tooltip: Absolute path to the nwm-cal-mgr Singularity container on the cluster.
 
           nwm_fcst_mgr_sif:
             label: NWM Forecast Manager Container Path
             type: string
+            default: /ngencerf-app/singularity/nwm-fcst-mgr.sif
+            hidden: true
             tooltip: Absolute path to the nwm-fcst-mgr Singularity container on the cluster.
 
           nwm_verf_sif:
             label: NWM Verification Container Path
             type: string
+            default: /ngencerf-app/singularity/nwm-verf.sif
+            hidden: true
             tooltip: Absolute path to the nwm-verf Singularity container on the cluster.
 
           # ── Data directories ─────────────────────────────────────────────────
           local_data_dir:
             label: Data Directory (host path)
             type: string
-            tooltip: Absolute path to the shared data directory on the cluster filesystem (e.g. /ngencerf-app/data/).
+            default: /ngencerf-app/data/ngen-cal-data/
+            hidden: true
+            tooltip: Absolute path to the shared data directory on the cluster filesystem.
 
           container_data_dir:
             label: Data Directory (container path)
             type: string
             default: /ngencerf/data/
+            hidden: true
             tooltip: Path inside the Singularity containers where the data directory is bind-mounted.
 
           # ── Application source directories ───────────────────────────────────
           ngencerf_server_dir:
             label: NGENCERF Server Repository Path
             type: string
+            default: /ngencerf-app/ngencerf-server
+            hidden: true
             tooltip: Absolute path to the ngencerf-server repository on the cluster (contains production-pw.yaml).
 
           ngencerf_ui_dir:
             label: NGENCERF UI Repository Path
             type: string
+            default: /ngencerf-app/ngencerf-ui
+            hidden: true
             tooltip: Absolute path to the ngencerf-ui repository on the cluster (contains compose.yaml).
+
+          ngencerf_docker_dir:
+            label: NGENCERF Docker Repository Path
+            type: string
+            default: /ngencerf-app/ngencerf-docker
+            hidden: true
+            tooltip: Absolute path to the ngencerf-docker repository on the cluster.
 
           # ── Build options ────────────────────────────────────────────────────
           build_server:
-            label: Build Server Image Locally?
+            label: Build ngencerf-server container?
             type: boolean
-            default: false
+            default: true
             tooltip: Set to Yes to rebuild the ngencerf-server Docker image from source before starting.
 
           build_ui:
-            label: Build UI Image Locally?
+            label: Build ngencerf-ui container?
             type: boolean
-            default: false
+            default: true
             tooltip: Set to Yes to rebuild the ngencerf-ui Docker image from source before starting.
 
           # ── Runtime options ──────────────────────────────────────────────────
           slurm_app_workers:
             label: SLURM Wrapper App Workers
-            type: string
-            default: "4"
+            type: number
+            default: 2
+            hidden: true
             tooltip: Number of Gunicorn worker processes for the SLURM job submission API (port 5000).
 
           only_connect:
