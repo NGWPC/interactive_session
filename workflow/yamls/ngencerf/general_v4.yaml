@@ -32,9 +32,7 @@ jobs:
           basepath=/me/session/${PW_USER}/${{ sessions.session }}
           PATH=$HOME/pw:$PATH
           service_name="${{ inputs.service.name }}"
-          service_parent_install_dir="${{ inputs.service.parent_install_dir }}"
           service_nginx_sif="${{ inputs.service.nginx_sif }}"
-          service_only_connect="${{ inputs.service.only_connect }}"
           service_slurm_app_workers="${{ inputs.service.slurm_app_workers }}"
           local_data_dir="${{ inputs.service.local_data_dir }}"
           container_data_dir="${{ inputs.service.container_data_dir }}"
@@ -242,22 +240,8 @@ jobs:
 
           # ── Runtime options ──────────────────────────────────────────────────
           slurm_app_workers:
-            label: SLURM Wrapper App Workers
+            label: Workers for SLURM wrapper app
             type: number
             default: 2
             hidden: true
             tooltip: Number of Gunicorn worker processes for the SLURM job submission API (port 5000).
-
-          only_connect:
-            label: Connect to Existing Session?
-            type: boolean
-            default: false
-            tooltip: |
-              Yes → Skip launching containers; connect the browser session to an already-running NGENCERF service.
-              No  → Start a fresh NGENCERF session.
-
-          parent_install_dir:
-            label: Python Install Directory
-            type: string
-            default: ${HOME}/pw/software
-            tooltip: Directory where the Python virtual environment for the SLURM wrapper app is installed. Must be on a filesystem accessible from both login and compute nodes.
