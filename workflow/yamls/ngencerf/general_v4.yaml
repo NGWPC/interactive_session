@@ -97,7 +97,6 @@ jobs:
             default: false
             hidden: true
             label: Schedule Job?
-            hidden: ${{ inputs.cluster.resource.schedulerType == '' }}
             ignore: ${{ .hidden }}
             tooltip: |
               Yes → Job is submitted to the SLURM scheduler via sbatch
