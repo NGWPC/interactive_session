@@ -51,10 +51,6 @@ if ! [ -f "${nwm_cal_mgr_singularity_container_path}" ]; then
    displayErrorMessage "nwm-cal-mgr singularity container was not found ${nwm_cal_mgr_singularity_container_path}"
 fi
 
-if ! [ -f "${ngen_bmi_forcing_singularity_container_path}" ]; then
-   displayErrorMessage "ngen-bmi-forcing singularity container was not found ${ngen_bmi_forcing_singularity_container_path}"
-fi
-
 if ! [ -f "${nwm_fcst_mgr_singularity_container_path}" ]; then
    displayErrorMessage "nwm-fcst-mgr singularity container was not found ${nwm_fcst_mgr_singularity_container_path}"
 fi
@@ -215,7 +211,6 @@ echo "cd ${service_ngencerf_server_dir}" >> cancel.sh
 echo "docker compose \
   --project-name ${service_name} \
   --project-directory ${service_ngencerf_server_dir} \
-  --env-file ${service_ngencerf_server_dir}/docker.env \
   --env-file ${service_ngencerf_server_dir}/cerfServer/.env-override \
   --file ${service_ngencerf_server_dir}/production-pw.yaml \
   down --remove-orphans" >> cancel.sh
@@ -234,6 +229,7 @@ fi
 export pw_platform_host="${pw_platform_host}"
 export basepath="${basepath}"
 export ngencerf_port="${ngencerf_port}"
+export HOSTNAME=$(hostname)
 
 # get ngencerf-server tag to be used within compose files
 export NGENCERF_SERVER_TAG=$( \
@@ -272,38 +268,38 @@ echo "Using Tag: $NGENCERF_UI_TAG"
 # Silence the expected orphan warning for multi-file projects
 export COMPOSE_IGNORE_ORPHANS=True
 
-if [[ "${service_build}" == "true" ]]; then
+if [[ "${service_build_server}" == "true" ]]; then
   # build locally and start ngencerf-server
   CACHE_BUST=$(date +%s) docker compose \
     --project-name ${service_name} \
     --project-directory ${service_ngencerf_server_dir} \
-    --env-file ${service_ngencerf_server_dir}/docker.env \
     --env-file ${service_ngencerf_server_dir}/cerfServer/.env-override \
     --file ${service_ngencerf_server_dir}/production-pw.yaml \
     up --detach --build ngencerf-services
-
-  # build locally and start ngencerf-ui
-  docker compose \
-    --project-name ${service_name} \
-    --project-directory ${service_ngencerf_ui_dir} \
-    --file ${service_ngencerf_ui_dir}/production-pw.yaml \
-    up --detach --build --no-deps ngencerf-app
 
 else
   # start ngencerf-server
   CACHE_BUST=$(date +%s) docker compose \
     --project-name ${service_name} \
     --project-directory ${service_ngencerf_server_dir} \
-    --env-file ${service_ngencerf_server_dir}/docker.env \
     --env-file ${service_ngencerf_server_dir}/cerfServer/.env-override \
     --file ${service_ngencerf_server_dir}/production-pw.yaml \
     up --detach --no-build --pull never ngencerf-services
+fi
 
+if [[ "${service_build_ui}" == "true" ]]; then
+  # build locally and start ngencerf-ui
+  docker compose \
+    --project-name ${service_name} \
+    --project-directory ${service_ngencerf_ui_dir} \
+    --file ${service_ngencerf_ui_dir}/compose.yaml \
+    up --detach --build --no-deps ngencerf-app
+else
   # start ngencerf-ui
   docker compose \
     --project-name ${service_name} \
     --project-directory ${service_ngencerf_ui_dir} \
-    --file ${service_ngencerf_ui_dir}/production-pw.yaml \
+    --file ${service_ngencerf_ui_dir}/compose.yaml \
     up --detach --no-build --pull never --no-deps ngencerf-app
 fi
 
@@ -311,7 +307,6 @@ fi
 ngencerf_image="$(docker compose \
   --project-name ${service_name} \
   --project-directory ${service_ngencerf_server_dir} \
-  --env-file ${service_ngencerf_server_dir}/docker.env \
   --env-file ${service_ngencerf_server_dir}/cerfServer/.env-override \
   --file ${service_ngencerf_server_dir}/production-pw.yaml \
   config | awk '/ngencerf-services/{flag=1} flag && /image:/{print $2; exit}')"

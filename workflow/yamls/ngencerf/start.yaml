@@ -196,11 +196,6 @@ jobs:
         type: string
         default: /ngencerf-app/singularity/nwm-cal-mgr.sif
         hidden: true
-      ngen_bmi_forcing_singularity_container_path:
-        label: Path to the ngen-forcing singularity container
-        type: string
-        default: /ngencerf-app/singularity/ngen-bmi-forcing.sif
-        hidden: true
       nwm_fcst_mgr_singularity_container_path:
         label: Path to the nwm-fcst-mgr singularity container
         type: string
@@ -252,11 +247,16 @@ jobs:
             type: string
             hidden: true
             default: ngencerf
-          build:
-            label: Build Docker Containers?
+          build_server:
+            label: Build ngencerf-server container?
             type: boolean
             default: true
-            tooltip: Select Yes to build the docker container running docker compose up --build
+            tooltip: Select Yes to build the ngencerf-server Docker container running docker compose up --build
+          build_ui:
+            label: Build ngencerf-ui container?
+            type: boolean
+            default: true
+            tooltip: Select Yes to build the ngencerf-ui Docker container running docker compose up --build
           ngencerf_server_dir:
             label: Directory with ngencerf-server
             type: string
