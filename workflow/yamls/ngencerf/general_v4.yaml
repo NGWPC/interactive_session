@@ -17,7 +17,7 @@ jobs:
         uses: parallelworks/checkout
         with:
           repo: https://github.com/avidalto/interactive_session.git
-          branch: development
+          branch: alvaro/v2
           sparse_checkout:
             - ${{ inputs.service.name }}
       - name: Create Inputs
