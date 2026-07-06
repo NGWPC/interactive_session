@@ -159,7 +159,16 @@ def write_slurm_script(run_id, job_type, input_file_local, output_file_local, si
         script.write('echo "Job isolated to CPUs: $CPUSET"\n\n')
 
         # Set the OpenMPI environment variable so it allows multiple cores for 1 task
-        script.write('export SINGULARITYENV_OMPI_MCA_rmaps_base_oversubscribe=1\n\n')
+        script.write('export SINGULARITYENV_OMPI_MCA_rmaps_base_oversubscribe=1\n')
+
+        # Force PMIx to use its process-local "hash" store instead of the
+        # shared-memory "dstore".  The dstore keeps backing files under /tmp,
+        # which we bind to the shared-filesystem scratch below; on a network
+        # filesystem PMIx cannot clean that directory up at teardown, so it logs
+        # a misleadingly named "PMIX ERROR: NO-PERMISSIONS in file dstore_base.c"
+        # warning (non-fatal, but noisy and it leaves the scratch dir behind).
+        # hash writes nothing to /tmp, so these single-node jobs lose nothing.
+        script.write('export SINGULARITYENV_PMIX_MCA_gds=hash\n\n')
 
         # Per-job scratch dir on the shared filesystem (EFS).  Lives under
         # LOCAL_DATA_DIR so it's also visible inside the container at
