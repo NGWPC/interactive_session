@@ -22,12 +22,12 @@ LOCAL_DATA_DIR = os.environ.get('local_data_dir')  # "/ngencerf-app/data/ngen-ca
 CONTAINER_DATA_DIR = os.environ.get('container_data_dir')  # "/ngencerf/data/"
 # Callback dir
 CALLBACKS_DIR = os.path.join(LOCAL_DATA_DIR, "slurm-callbacks", "pending")
-# Path to the singularity container with ngen-cal
+# Path to the nwm-cal-mgr singularity container
 NWM_CAL_MGR_SINGULARITY_CONTAINER_PATH = os.environ.get('nwm_cal_mgr_singularity_container_path')
-# Path to the singularity container with ngen-forcing
+# Path to the nwm-fcst-mgr singularity container
 NWM_FCST_MGR_SINGULARITY_CONTAINER_PATH = os.environ.get('nwm_fcst_mgr_singularity_container_path')
-# Path to the nwm_verf singularity container
-NWM_VERF_SINGULARITY_CONTAINER_PATH = os.environ.get('nwm_verf_singularity_container_path')
+# Path to the nwm-eval-mgr singularity container
+NWM_EVAL_MGR_SINGULARITY_CONTAINER_PATH = os.environ.get('nwm_eval_mgr_singularity_container_path')
 # URL to callback from ngencal to the other services
 NGENCERF_URL = f"http://{CONTROLLER_HOSTNAME}:8000"
 # Command to launch singularity.
@@ -36,7 +36,7 @@ NGENCERF_URL = f"http://{CONTROLLER_HOSTNAME}:8000"
 # not baked into these constants.
 SINGULARITY_RUN_NWM_CAL_MGR_CMD = f"/usr/bin/time -v singularity run -B {LOCAL_DATA_DIR}:{CONTAINER_DATA_DIR} --env NGENCERF_URL={NGENCERF_URL} {NWM_CAL_MGR_SINGULARITY_CONTAINER_PATH}"
 SINGULARITY_RUN_NWM_FCST_MGR_CMD = f"/usr/bin/time -v singularity run -B {LOCAL_DATA_DIR}:{CONTAINER_DATA_DIR} --env NGENCERF_URL={NGENCERF_URL} {NWM_FCST_MGR_SINGULARITY_CONTAINER_PATH}"
-SINGULARITY_RUN_NWM_VERF_CMD = f"/usr/bin/time -v singularity run -B {LOCAL_DATA_DIR}:{CONTAINER_DATA_DIR} --env NGENCERF_URL={NGENCERF_URL} {NWM_VERF_SINGULARITY_CONTAINER_PATH}"
+SINGULARITY_RUN_NWM_EVAL_MGR_CMD = f"/usr/bin/time -v singularity run -B {LOCAL_DATA_DIR}:{CONTAINER_DATA_DIR} --env NGENCERF_URL={NGENCERF_URL} {NWM_EVAL_MGR_SINGULARITY_CONTAINER_PATH}"
 
 # Slurm job metrics for sacct command
 SLURM_JOB_METRICS = os.environ.get('SLURM_JOB_METRICS')
@@ -684,7 +684,7 @@ def submit_verification_job():
     if not auth_token:
         return log_and_return_error("No auth_token provided", status_code=400)
 
-    singularity_run_cmd = f"{SINGULARITY_RUN_NWM_VERF_CMD} verification {verification_config}"
+    singularity_run_cmd = f"{SINGULARITY_RUN_NWM_EVAL_MGR_CMD} verification {verification_config}"
 
     callbacks_dir = os.path.join(CALLBACKS_DIR, job_type, verification_run_id)
 
