@@ -3,6 +3,10 @@ set -x
 
 echo whoami ": $(whoami)"
 
+if [ -z ${service_parent_install_dir} ]; then
+    service_parent_install_dir=${HOME}/pw/software
+fi
+
 PORT=5000
 if lsof -i :$PORT >/dev/null 2>&1; then
     echo
@@ -42,6 +46,13 @@ if [[ "${service_only_connect}" == "true" ]]; then
     echo "Connecting to existing ngencerf service listening on port ${ngencerf_port}"
     sleep infinity
 fi
+
+# Previously provided by the session wrapper; the v1.4 session_runner injects no
+# helper functions, so define it here.
+displayErrorMessage() {
+    echo $(date): $1
+    exit 1
+}
 
 if ! [ -f "${service_nginx_sif}" ]; then
    displayErrorMessage "NGINX proxy singularity container was not found ${service_nginx_sif}"
@@ -259,9 +270,8 @@ fi
 #sudo chmod -R a+rwX ${local_data_dir}/forecast_forcing_work/
 #date > ${local_data_dir}/forecast_forcing_work/date.txt
 
-# Install Flask
-sudo -n pip3.8 install Flask
-sudo -n pip3.8 install gunicorn
+# Transfer Python script
+cp ${PW_PARENT_JOB_DIR}/ngencerf/slurm-wrapper-app-v3.py .
 
 # Start Flask app using gunicorn
 #gunicorn -w ${service_slurm_app_workers} -b 0.0.0.0:5000 slurm-wrapper-app:app > slurm-wrapper-app-v3.log 2>&1 &
@@ -272,10 +282,11 @@ sudo -n pip3.8 install gunicorn
 export PARTITIONS=$(scontrol show partition | awk -F '=' '/^PartitionName=/ {printf "%s,", $2}' | sed 's/,$//')
 
 # This script is required to run the callback with retries
+cp ${PW_PARENT_JOB_DIR}/ngencerf/run_callback.sh .
 sed -i "s|__LOCAL_DATA_DIR__|${local_data_dir}|g" run_callback.sh
 chmod +x run_callback.sh
 
-/usr/local/bin/gunicorn -w ${service_slurm_app_workers} -b 0.0.0.0:5000 slurm-wrapper-app-v3:app \
+${service_parent_install_dir}/ngencerf-venv/bin/gunicorn -w ${service_slurm_app_workers} -b 0.0.0.0:5000 slurm-wrapper-app-v3:app \
   --access-logfile slurm-wrapper-app-v3.log \
   --error-logfile slurm-wrapper-app-v3.log \
   --capture-output \
@@ -288,6 +299,7 @@ echo "kill ${slurm_wrapper_pid}" >> cancel.sh
 
 
 # Rerun previous callbacks
+cp ${PW_PARENT_JOB_DIR}/ngencerf/run_pending_callbacks.sh .
 sed -i "s|__LOCAL_DATA_DIR__|${local_data_dir}|g" run_pending_callbacks.sh
 bash run_pending_callbacks.sh >> run_pending_callback.log 2>&1 &
 run_pending_callbacks_pid=$!
