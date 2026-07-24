@@ -66,8 +66,8 @@ if ! [ -f "${nwm_fcst_mgr_singularity_container_path}" ]; then
    displayErrorMessage "nwm-fcst-mgr singularity container was not found ${nwm_fcst_mgr_singularity_container_path}"
 fi
 
-if ! [ -f "${nwm_verf_singularity_container_path}" ]; then
-   displayErrorMessage "nwm-verf singularity container was not found ${nwm_verf_singularity_container_path}"
+if ! [ -f "${nwm_eval_mgr_singularity_container_path}" ]; then
+   displayErrorMessage "nwm-eval-mgr singularity container was not found ${nwm_eval_mgr_singularity_container_path}"
 fi
 
 #################

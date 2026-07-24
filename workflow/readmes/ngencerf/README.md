@@ -7,7 +7,7 @@ Launch the **NGENCERF** (Next Generation Engine for Community Research on Enviro
 - Full NGENCERF stack: server (Django/REST API), UI (React), and SLURM job submission API
 - Runs NWM calibration, validation, forecast, hindcast, cold-start, and verification jobs on SLURM
 - NGINX reverse proxy with WebSocket support, running as an unprivileged Singularity container
-- SLURM wrapper Flask app for submitting ngen-cal/nwm-fcst-mgr/nwm-verf Singularity jobs
+- SLURM wrapper Flask app for submitting ngen-cal/nwm-fcst-mgr/nwm-eval-mgr Singularity jobs
 - Automatic callback retry — pending job callbacks resume when a session restarts
 - Optional local Docker image build for server and UI components
 - Connect-only mode to attach a new browser session to an already-running service
@@ -27,7 +27,7 @@ The target cluster must have:
 - **SLURM** with `scontrol`, `sbatch`, `squeue`, `sacct`, `scancel` available
 - **Passwordless sudo** for the session user (`sudo -n true` must succeed)
 - **Python 3** with `venv` module (for the SLURM wrapper app virtual environment)
-- Pre-pulled Singularity containers: nginx-unprivileged, nwm-cal-mgr, nwm-fcst-mgr, nwm-verf
+- Pre-pulled Singularity containers: nginx-unprivileged, nwm-cal-mgr, nwm-fcst-mgr, nwm-eval-mgr
 - Pre-cloned repositories on shared storage: ngencerf-server (with `production-pw.yaml`) and ngencerf-ui (with `compose.yaml`)
 - Shared filesystem accessible from both login and compute nodes for data and software installs
 
@@ -52,7 +52,7 @@ The target cluster must have:
 | NGINX Singularity Container Path | Path to `nginx-unprivileged.sif` |
 | NWM Calibration Manager Container Path | Path to the nwm-cal-mgr `.sif` |
 | NWM Forecast Manager Container Path | Path to the nwm-fcst-mgr `.sif` |
-| NWM Verification Container Path | Path to the nwm-verf `.sif` |
+| NWM Evaluation Manager Container Path | Path to the nwm-eval-mgr `.sif` |
 
 **Data Directories:**
 

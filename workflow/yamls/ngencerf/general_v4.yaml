@@ -38,7 +38,7 @@ jobs:
           container_data_dir="${{ inputs.service.container_data_dir }}"
           nwm_cal_mgr_singularity_container_path="${{ inputs.service.nwm_cal_mgr_sif }}"
           nwm_fcst_mgr_singularity_container_path="${{ inputs.service.nwm_fcst_mgr_sif }}"
-          nwm_verf_singularity_container_path="${{ inputs.service.nwm_verf_sif }}"
+          nwm_eval_mgr_singularity_container_path="${{ inputs.service.nwm_eval_mgr_sif }}"
           service_ngencerf_server_dir="${{ inputs.service.ngencerf_server_dir }}"
           service_ngencerf_ui_dir="${{ inputs.service.ngencerf_ui_dir }}"
           service_ngencerf_docker_dir="${{ inputs.service.ngencerf_docker_dir }}"
@@ -180,12 +180,12 @@ jobs:
             hidden: true
             tooltip: Absolute path to the nwm-fcst-mgr Singularity container on the cluster.
 
-          nwm_verf_sif:
-            label: NWM Verification Container Path
+          nwm_eval_mgr_sif:
+            label: NWM Evaluation Manager Container Path
             type: string
-            default: /ngencerf-app/singularity/nwm-verf.sif
+            default: /ngencerf-app/singularity/nwm-eval-mgr.sif
             hidden: true
-            tooltip: Absolute path to the nwm-verf Singularity container on the cluster.
+            tooltip: Absolute path to the nwm-eval-mgr Singularity container on the cluster.
 
           # ── Data directories ─────────────────────────────────────────────────
           local_data_dir:
