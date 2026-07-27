@@ -1,0 +1,246 @@
+# yaml-language-server: $schema=https://activate.parallel.works/workflow.schema.json
+permissions:
+  - '*'
+sessions:
+  session:
+    useTLS: false
+    redirect: true
+    prompt-for-name:
+      default: 'ngencerf'
+
+jobs:
+  preprocessing:
+    ssh:
+      remoteHost: ${{ inputs.cluster.resource.ip }}
+    steps:
+      - name: Checkout
+        uses: parallelworks/checkout
+        with:
+          repo: https://github.com/NGWPC/interactive_session.git
+          branch: development
+          sparse_checkout:
+            - ${{ inputs.service.name }}
+      - name: Create Inputs
+        run: |
+          set -x
+          # Write PW platform environment variables (excludes API key)
+          env | grep '^PW_' | grep -v 'PW_API_KEY' > inputs.sh
+          # Encase values in quotes
+          sed -i 's/=\(.*\)/="\1"/' inputs.sh
+          # Write form inputs and session-specific variables
+          cat <<'EOF' >> inputs.sh
+          basepath=/me/session/${PW_USER}/${{ sessions.session }}
+          PATH=$HOME/pw:$PATH
+          service_name="${{ inputs.service.name }}"
+          service_nginx_sif="${{ inputs.service.nginx_sif }}"
+          service_slurm_app_workers="${{ inputs.service.slurm_app_workers }}"
+          local_data_dir="${{ inputs.service.local_data_dir }}"
+          container_data_dir="${{ inputs.service.container_data_dir }}"
+          nwm_cal_mgr_singularity_container_path="${{ inputs.service.nwm_cal_mgr_sif }}"
+          nwm_fcst_mgr_singularity_container_path="${{ inputs.service.nwm_fcst_mgr_sif }}"
+          nwm_eval_mgr_singularity_container_path="${{ inputs.service.nwm_eval_mgr_sif }}"
+          service_ngencerf_server_dir="${{ inputs.service.ngencerf_server_dir }}"
+          service_ngencerf_ui_dir="${{ inputs.service.ngencerf_ui_dir }}"
+          service_ngencerf_docker_dir="${{ inputs.service.ngencerf_docker_dir }}"
+          service_build_server="${{ inputs.service.build_server }}"
+          service_build_ui="${{ inputs.service.build_ui }}"
+          pw_platform_host="${PW_PLATFORM_HOST}"
+          EOF
+          # Remove empty/undefined variables and export all
+          sed -i '/=\s*$\|=undefined\s*$/d' inputs.sh
+          sed -i '/=""/d' inputs.sh
+          sed -i 's/^/export /' inputs.sh
+
+  session_runner:
+    needs:
+      - preprocessing
+    ssh:
+      remoteHost: ${{ inputs.cluster.resource.ip }}
+    steps:
+      - uses: github/parallelworks/interactive_session@main
+        early-cancel: any-job-failed
+        with:
+          $yaml: workflow/session_runner/v1.4/general.yaml
+          session: ${{ sessions.session }}
+          resource: ${{ inputs.cluster.resource }}
+          cluster:
+            scheduler: ${{ inputs.cluster.scheduler }}
+            slurm:
+              is_enabled: ${{ inputs.cluster.slurm.is_enabled }}
+              partition: ${{ inputs.cluster.slurm.partition }}
+              scheduler_directives: ${{ inputs.cluster.slurm.scheduler_directives }}
+              time: ${{ inputs.cluster.slurm.time }}
+            pbs:
+              is_enabled: ${{ inputs.cluster.pbs.is_enabled }}
+              scheduler_directives: ${{ inputs.cluster.pbs.scheduler_directives }}
+          service:
+            start_service_script: ${PW_PARENT_JOB_DIR}/${{ inputs.service.name }}/start-template-v3.sh
+            controller_script: ${PW_PARENT_JOB_DIR}/${{ inputs.service.name }}/controller-v3.sh
+            inputs_sh: ${PW_PARENT_JOB_DIR}/inputs.sh
+            slug: ""
+            rundir: ${PW_PARENT_JOB_DIR}
+
+'on':
+  execute:
+    inputs:
+      cluster:
+        type: group
+        label: Compute Cluster Settings
+        items:
+          resource:
+            type: compute-clusters
+            label: Service host
+            include-workspace: false
+            tooltip: Resource to host the NGENCERF service
+          scheduler:
+            type: boolean
+            default: false
+            hidden: true
+            label: Schedule Job?
+            tooltip: |
+              Yes → Job is submitted to the SLURM scheduler via sbatch
+              No  → Job runs directly on the controller/login node
+          slurm:
+            type: group
+            label: SLURM Directives
+            hidden: ${{ inputs.cluster.resource.schedulerType != 'slurm' || inputs.cluster.scheduler == false }}
+            ignore: ${{ inputs.cluster.resource.schedulerType != 'slurm' || inputs.cluster.scheduler == false }}
+            items:
+              is_enabled:
+                type: boolean
+                hidden: true
+                default: true
+                label: Is SLURM Enabled?
+              partition:
+                type: slurm-partitions
+                label: SLURM partition
+                optional: true
+                resource: ${{ inputs.cluster.resource }}
+                tooltip: Select a SLURM partition from the drop-down menu.
+              time:
+                label: Walltime
+                type: string
+                default: '08:00:00'
+                tooltip: '--time= SLURM directive. Set the maximum wall-clock time for the session.'
+              scheduler_directives:
+                type: editor
+                optional: true
+                tooltip: |
+                  Add extra SLURM directives, one per line, using the #SBATCH prefix. For example:
+                  #SBATCH --exclusive
+                  #SBATCH --nodelist=<node-name>
+          pbs:
+            type: group
+            label: PBS Directives
+            hidden: ${{ inputs.cluster.resource.schedulerType != 'pbs' || inputs.cluster.scheduler == false }}
+            ignore: ${{ inputs.cluster.resource.schedulerType != 'pbs' || inputs.cluster.scheduler == false }}
+            items:
+              is_enabled:
+                type: boolean
+                hidden: true
+                default: true
+                label: Is PBS Enabled?
+              scheduler_directives:
+                label: Scheduler Directives
+                type: editor
+                tooltip: |
+                  Add extra PBS directives, one per line, using the #PBS prefix. For example:
+                  #PBS -l mem=16gb
+                  #PBS -l ngpus=1
+
+      service:
+        type: group
+        label: NGENCERF Settings
+        collapsed: true
+        items:
+          name:
+            type: string
+            hidden: true
+            default: ngencerf
+
+          # ── Container paths ──────────────────────────────────────────────────
+          nginx_sif:
+            label: NGINX Singularity Container Path
+            type: string
+            default: /ngencerf-app/singularity/nginx-unprivileged.sif
+            hidden: true
+            tooltip: Absolute path to the nginx-unprivileged Singularity (.sif) container on the cluster.
+
+          nwm_cal_mgr_sif:
+            label: NWM Calibration Manager Container Path
+            type: string
+            default: /ngencerf-app/singularity/nwm-cal-mgr.sif
+            hidden: true
+            tooltip: Absolute path to the nwm-cal-mgr Singularity container on the cluster.
+
+          nwm_fcst_mgr_sif:
+            label: NWM Forecast Manager Container Path
+            type: string
+            default: /ngencerf-app/singularity/nwm-fcst-mgr.sif
+            hidden: true
+            tooltip: Absolute path to the nwm-fcst-mgr Singularity container on the cluster.
+
+          nwm_eval_mgr_sif:
+            label: NWM Evaluation Manager Container Path
+            type: string
+            default: /ngencerf-app/singularity/nwm-eval-mgr.sif
+            hidden: true
+            tooltip: Absolute path to the nwm-eval-mgr Singularity container on the cluster.
+
+          # ── Data directories ─────────────────────────────────────────────────
+          local_data_dir:
+            label: Data Directory (host path)
+            type: string
+            default: /ngencerf-app/data/ngen-cal-data/
+            hidden: true
+            tooltip: Absolute path to the shared data directory on the cluster filesystem.
+
+          container_data_dir:
+            label: Data Directory (container path)
+            type: string
+            default: /ngencerf/data/
+            hidden: true
+            tooltip: Path inside the Singularity containers where the data directory is bind-mounted.
+
+          # ── Application source directories ───────────────────────────────────
+          ngencerf_server_dir:
+            label: NGENCERF Server Repository Path
+            type: string
+            default: /ngencerf-app/ngencerf-server
+            hidden: true
+            tooltip: Absolute path to the ngencerf-server repository on the cluster (contains production-pw.yaml).
+
+          ngencerf_ui_dir:
+            label: NGENCERF UI Repository Path
+            type: string
+            default: /ngencerf-app/ngencerf-ui
+            hidden: true
+            tooltip: Absolute path to the ngencerf-ui repository on the cluster (contains compose.yaml).
+
+          ngencerf_docker_dir:
+            label: NGENCERF Docker Repository Path
+            type: string
+            default: /ngencerf-app/ngencerf-docker
+            hidden: true
+            tooltip: Absolute path to the ngencerf-docker repository on the cluster.
+
+          # ── Build options ────────────────────────────────────────────────────
+          build_server:
+            label: Build ngencerf-server container?
+            type: boolean
+            default: true
+            tooltip: Set to Yes to rebuild the ngencerf-server Docker image from source before starting.
+
+          build_ui:
+            label: Build ngencerf-ui container?
+            type: boolean
+            default: true
+            tooltip: Set to Yes to rebuild the ngencerf-ui Docker image from source before starting.
+
+          # ── Runtime options ──────────────────────────────────────────────────
+          slurm_app_workers:
+            label: Workers for SLURM wrapper app
+            type: number
+            default: 2
+            hidden: true
+            tooltip: Number of Gunicorn worker processes for the SLURM job submission API (port 5000).
